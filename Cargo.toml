@@ -1,0 +1,13 @@
+[package]
+name = "vnc"
+version = "0.1.0"
+authors = ["whitequark <whitequark@whitequark.org>"]
+
+[dependencies]
+# library deps
+log = "^0.3"
+byteorder = "^0.4"
+# binary deps
+clap = "^1.5"
+sdl2 = "^0.13"
+env_logger = "^0.3"

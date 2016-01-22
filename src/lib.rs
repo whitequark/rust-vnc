@@ -123,17 +123,29 @@ impl ClientEvent {
     }
 }
 
-pub struct Client {
-    stream:  TcpStream,
-    events:  Receiver<ClientEvent>,
-    version: Version,
-    name:    String,
-    size:    (u16, u16),
-    format:  PixelFormat
+pub struct ClientBuilder {
+    shared:       bool,
+    copy_rect:    bool,
+    set_cursor:   bool,
+    resize:       bool,
 }
 
-impl Client {
-    pub fn from_tcp_stream<Auth>(mut stream: TcpStream, auth: Auth, shared: bool) -> Result<Client>
+impl ClientBuilder {
+    pub fn new() -> ClientBuilder {
+        ClientBuilder {
+            shared:       false,
+            copy_rect:    false,
+            set_cursor:   false,
+            resize:       false,
+        }
+    }
+
+    pub fn shared    (mut self, value: bool) -> ClientBuilder { self.shared = value; self }
+    pub fn copy_rect (mut self, value: bool) -> ClientBuilder { self.copy_rect = value; self }
+    pub fn set_cursor(mut self, value: bool) -> ClientBuilder { self.set_cursor = value; self }
+    pub fn resize    (mut self, value: bool) -> ClientBuilder { self.resize = value; self }
+
+    pub fn from_tcp_stream<Auth>(self, mut stream: TcpStream, auth: Auth) -> Result<Client>
             where Auth: FnOnce(&[AuthMethod]) -> Option<AuthChoice> {
         let version = try!(protocol::Version::read_from(&mut stream));
         debug!("<- Version::{:?}", version);
@@ -207,7 +219,7 @@ impl Client {
             }
         }
 
-        let client_init = protocol::ClientInit { shared: shared };
+        let client_init = protocol::ClientInit { shared: self.shared };
         debug!("-> {:?}", client_init);
         try!(protocol::ClientInit::write_to(&client_init, &mut stream));
 
@@ -216,6 +228,15 @@ impl Client {
 
         let events = ClientEvent::pump(stream.try_clone().unwrap(),
                                        server_init.pixel_format.clone());
+
+        let mut encodings = vec![protocol::Encoding::Raw];
+        if self.copy_rect  { encodings.push(protocol::Encoding::CopyRect) }
+        if self.set_cursor { encodings.push(protocol::Encoding::Cursor) }
+        if self.resize     { encodings.push(protocol::Encoding::DesktopSize) }
+
+        let set_encodings = protocol::C2S::SetEncodings(encodings);
+        debug!("-> {:?}", set_encodings);
+        try!(protocol::C2S::write_to(&set_encodings, &mut stream));
 
         Ok(Client {
             stream:  stream,
@@ -226,7 +247,18 @@ impl Client {
             format:  server_init.pixel_format
         })
     }
+}
 
+pub struct Client {
+    stream:  TcpStream,
+    events:  Receiver<ClientEvent>,
+    version: Version,
+    name:    String,
+    size:    (u16, u16),
+    format:  PixelFormat
+}
+
+impl Client {
     pub fn version(&self) -> Version { self.version }
     pub fn name(&self) -> &str { &self.name }
     pub fn size(&self) -> (u16, u16) { self.size }

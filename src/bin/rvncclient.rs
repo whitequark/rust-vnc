@@ -42,7 +42,10 @@ fn main() {
         };
 
     let mut vnc =
-        match vnc::Client::from_tcp_stream(stream, |methods| {
+        match vnc::ClientBuilder::new()
+                 .copy_rect(true)
+                 .resize(true)
+                 .from_tcp_stream(stream, |methods| {
             for method in methods {
                 match method {
                     &vnc::AuthMethod::None => return Some(vnc::AuthChoice::None),
@@ -50,7 +53,7 @@ fn main() {
                 }
             }
             None
-        }, true) {
+        }) {
             Ok(vnc) => vnc,
             Err(error) => {
                 error!("cannot initialize VNC session: {}", error);
@@ -93,8 +96,6 @@ fn main() {
         sdl_format, (width as u32, height as u32)).unwrap();
 
     renderer.clear();
-    vnc.enable_copy_pixels().unwrap();
-    vnc.enable_resize().unwrap();
     vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
                        false).unwrap();
 

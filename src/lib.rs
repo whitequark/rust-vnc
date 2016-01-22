@@ -7,52 +7,155 @@ mod protocol;
 
 pub use protocol::{Error, Result, Version, PixelFormat};
 
-use std::net::TcpStream;
+use std::io::Read;
+use std::net::{TcpStream, Shutdown};
+use std::thread;
+use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use protocol::Message;
 
+#[derive(Debug)]
 pub enum AuthMethod {
     None,
     /* more to come */
     Unused
 }
 
+#[derive(Debug)]
 pub enum AuthChoice {
     None,
     /* more to come */
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Rect {
+    pub left:   u16,
+    pub top:    u16,
+    pub width:  u16,
+    pub height: u16
+}
+
+#[derive(Debug)]
+pub enum ClientEvent {
+    Disconnected,
+    Resize(u16, u16),
+    PutPixels(Rect, Vec<u8>),
+    CopyPixels { src: Rect, dst: Rect },
+    Clipboard(String),
+    Bell,
+}
+
+macro_rules! send_or_return {
+    ($chan:expr, $data:expr) => ({
+        match $chan.send($data) {
+            Ok(()) => (),
+            Err(_) => return Err(Error::UnexpectedEOF)
+        }
+    })
+}
+
+impl ClientEvent {
+    fn pump_one(stream: &mut TcpStream, format: &protocol::PixelFormat,
+                tx_events: &mut Sender<ClientEvent>) -> Result<()> {
+        let packet = try!(protocol::S2C::read_from(stream));
+        debug!("<- {:?}", packet);
+        match packet {
+            protocol::S2C::FramebufferUpdate { count } => {
+                for _ in 0..count {
+                    let rectangle = try!(protocol::Rectangle::read_from(stream));
+                    debug!("<- {:?}", rectangle);
+                    let event = match rectangle.encoding {
+                        protocol::Encoding::Raw => {
+                            let mut pixels = vec![0; (rectangle.width as usize) *
+                                                     (rectangle.height as usize) *
+                                                     (format.bits_per_pixel as usize / 8)];
+                            try!(stream.read_exact(&mut pixels));
+                            ClientEvent::PutPixels(Rect {
+                                left:   rectangle.x_position,
+                                top:    rectangle.y_position,
+                                width:  rectangle.width,
+                                height: rectangle.height
+                            }, pixels)
+                        },
+                        protocol::Encoding::CopyRect => {
+                            let copy_rect = try!(protocol::CopyRect::read_from(stream));
+                            let src = Rect {
+                                left:   copy_rect.src_x_position,
+                                top:    copy_rect.src_y_position,
+                                width:  rectangle.width,
+                                height: rectangle.height
+                            };
+                            let dst = Rect {
+                                left:   rectangle.x_position,
+                                top:    rectangle.y_position,
+                                width:  rectangle.width,
+                                height: rectangle.height
+                            };
+                            ClientEvent::CopyPixels { src: src, dst: dst }
+                        },
+                        protocol::Encoding::DesktopSize =>
+                            ClientEvent::Resize(rectangle.width, rectangle.height),
+                        _ => return Err(Error::UnexpectedValue("encoding"))
+                    };
+                    send_or_return!(tx_events, event)
+                }
+            },
+            protocol::S2C::Bell =>
+                send_or_return!(tx_events, ClientEvent::Bell),
+            protocol::S2C::CutText(text) =>
+                send_or_return!(tx_events, ClientEvent::Clipboard(text)),
+            _ => return Err(Error::UnexpectedValue("server to client packet"))
+        };
+        Ok(())
+    }
+
+    fn pump(mut stream: TcpStream, format: protocol::PixelFormat) -> Receiver<ClientEvent> {
+        let (mut tx_events, rx_events) = channel();
+        thread::spawn(move || {
+            loop {
+                match ClientEvent::pump_one(&mut stream, &format, &mut tx_events) {
+                    Ok(()) => (),
+                    Err(Error::UnexpectedEOF) => break,
+                    Err(error) => panic!("cannot pump VNC client events: {}", error)
+                }
+            }
+        });
+        rx_events
+    }
+}
+
 pub struct Client {
-    socket:  TcpStream,
+    stream:  TcpStream,
+    events:  Receiver<ClientEvent>,
     version: Version,
     name:    String,
     size:    (u16, u16),
-    format:  protocol::PixelFormat,
+    format:  PixelFormat
 }
 
 impl Client {
-    pub fn from_tcp_stream<Auth>(mut socket: TcpStream, auth: Auth, shared: bool) -> Result<Client>
+    pub fn from_tcp_stream<Auth>(mut stream: TcpStream, auth: Auth, shared: bool) -> Result<Client>
             where Auth: FnOnce(&[AuthMethod]) -> Option<AuthChoice> {
-        let version = try!(protocol::Version::read_from(&mut socket));
+        let version = try!(protocol::Version::read_from(&mut stream));
         debug!("<- Version::{:?}", version);
         debug!("-> Version::{:?}", version);
-        try!(protocol::Version::write_to(&version, &mut socket));
+        try!(protocol::Version::write_to(&version, &mut stream));
 
         let security_types = match version {
             Version::Rfb33 => {
-                let security_type = try!(protocol::SecurityType::read_from(&mut socket));
+                let security_type = try!(protocol::SecurityType::read_from(&mut stream));
                 debug!("<- SecurityType::{:?}", security_type);
                 if security_type == protocol::SecurityType::Invalid {
-                    let reason = try!(String::read_from(&mut socket));
+                    let reason = try!(String::read_from(&mut stream));
                     debug!("<- {:?}", reason);
                     return Err(Error::Server(reason))
                 }
                 vec![security_type]
             },
             _ => {
-                let security_types = try!(protocol::SecurityTypes::read_from(&mut socket));
+                let security_types = try!(protocol::SecurityTypes::read_from(&mut stream));
                 debug!("<- {:?}", security_types);
                 if security_types.0.len() == 0 {
-                    let reason = try!(String::read_from(&mut socket));
+                    let reason = try!(String::read_from(&mut stream));
                     debug!("<- {:?}", reason);
                     return Err(Error::Server(reason))
                 }
@@ -78,7 +181,7 @@ impl Client {
                     AuthChoice::None => protocol::SecurityType::None,
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
-                try!(protocol::SecurityType::write_to(&used_security_type, &mut socket));
+                try!(protocol::SecurityType::write_to(&used_security_type, &mut stream));
             }
         }
 
@@ -90,13 +193,13 @@ impl Client {
         }
 
         if !skip_security_result {
-            let security_result = try!(protocol::SecurityResult::read_from(&mut socket));
+            let security_result = try!(protocol::SecurityResult::read_from(&mut stream));
             if security_result == protocol::SecurityResult::Failed {
                 match version {
                     Version::Rfb33 | Version::Rfb37 =>
                         return Err(Error::AuthenticationFailure(String::from(""))),
                     Version::Rfb38 => {
-                        let reason = try!(String::read_from(&mut socket));
+                        let reason = try!(String::read_from(&mut stream));
                         debug!("<- {:?}", reason);
                         return Err(Error::AuthenticationFailure(reason))
                     }
@@ -106,28 +209,113 @@ impl Client {
 
         let client_init = protocol::ClientInit { shared: shared };
         debug!("-> {:?}", client_init);
-        try!(protocol::ClientInit::write_to(&client_init, &mut socket));
+        try!(protocol::ClientInit::write_to(&client_init, &mut stream));
 
-        let server_init = try!(protocol::ServerInit::read_from(&mut socket));
+        let server_init = try!(protocol::ServerInit::read_from(&mut stream));
         debug!("<- {:?}", server_init);
 
-        let set_encodings = protocol::C2S::SetEncodings(vec![
-            protocol::Encoding::Raw,
-            protocol::Encoding::DesktopSize
-        ]);
-        debug!("-> {:?}", set_encodings);
-        try!(protocol::C2S::write_to(&set_encodings, &mut socket));
+        let events = ClientEvent::pump(stream.try_clone().unwrap(),
+                                       server_init.pixel_format.clone());
 
         Ok(Client {
-            socket:  socket,
+            stream:  stream,
+            events:  events,
             version: version,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
-            format:  server_init.pixel_format,
+            format:  server_init.pixel_format
         })
     }
 
     pub fn version(&self) -> Version { self.version }
     pub fn name(&self) -> &str { &self.name }
     pub fn size(&self) -> (u16, u16) { self.size }
+    pub fn format(&self) -> PixelFormat { self.format.clone() }
+
+    fn enable_encodings(&mut self, encodings: &[protocol::Encoding]) -> Result<()> {
+        let set_encodings = protocol::C2S::SetEncodings(Vec::from(encodings));
+        debug!("-> {:?}", set_encodings);
+        try!(protocol::C2S::write_to(&set_encodings, &mut self.stream));
+        Ok(())
+    }
+
+    pub fn enable_copy_pixels(&mut self) -> Result<()> {
+        self.enable_encodings(&[protocol::Encoding::CopyRect])
+    }
+
+    pub fn enable_resize(&mut self) -> Result<()> {
+        self.enable_encodings(&[protocol::Encoding::DesktopSize])
+    }
+
+    pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
+        let update_req = protocol::C2S::FramebufferUpdateRequest {
+            incremental: incremental,
+            x_position:  rect.left,
+            y_position:  rect.top,
+            width:       rect.width,
+            height:      rect.height
+        };
+        trace!("-> {:?}", update_req);
+        try!(protocol::C2S::write_to(&update_req, &mut self.stream));
+        Ok(())
+    }
+
+    pub fn send_key_event(&mut self, down: bool, key: u32) -> Result<()> {
+        let key_event = protocol::C2S::KeyEvent {
+            down: down,
+            key:  key
+        };
+        debug!("-> {:?}", key_event);
+        try!(protocol::C2S::write_to(&key_event, &mut self.stream));
+        Ok(())
+    }
+
+    pub fn send_pointer_event(&mut self, buttons: u8, x: u16, y: u16) -> Result<()> {
+        let pointer_event = protocol::C2S::PointerEvent {
+            button_mask: buttons,
+            x_position:  x,
+            y_position:  y
+        };
+        debug!("-> {:?}", pointer_event);
+        try!(protocol::C2S::write_to(&pointer_event, &mut self.stream));
+        Ok(())
+    }
+
+    pub fn update_clipboard(&mut self, text: &str) -> Result<()> {
+        let cut_text = protocol::C2S::CutText(String::from(text));
+        debug!("-> {:?}", cut_text);
+        try!(protocol::C2S::write_to(&cut_text, &mut self.stream));
+        Ok(())
+    }
+
+    pub fn poll_event(&mut self) -> Option<ClientEvent> {
+        match self.events.try_recv() {
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(ClientEvent::Disconnected),
+            Ok(ClientEvent::Resize(width, height)) => {
+                self.size = (width, height);
+                Some(ClientEvent::Resize(width, height))
+            }
+            Ok(event) => Some(event)
+        }
+    }
+
+    pub fn poll_iter(&mut self) -> ClientEventPollIterator {
+        ClientEventPollIterator { client: self }
+    }
+
+    pub fn disconnect(self) -> Result<()> {
+        try!(self.stream.shutdown(Shutdown::Both));
+        Ok(())
+    }
+}
+
+pub struct ClientEventPollIterator<'a> {
+    client:  &'a mut Client
+}
+
+impl<'a> Iterator for ClientEventPollIterator<'a> {
+    type Item = ClientEvent;
+
+    fn next(&mut self) -> Option<Self::Item> { self.client.poll_event() }
 }

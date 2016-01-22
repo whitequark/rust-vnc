@@ -225,7 +225,7 @@ impl Message for ClientInit {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PixelFormat {
     pub bits_per_pixel: u8,
     pub depth:          u8,
@@ -296,6 +296,27 @@ impl Message for ServerInit {
         try!(writer.write_u16::<BigEndian>(self.framebuffer_height));
         try!(PixelFormat::write_to(&self.pixel_format, writer));
         try!(String::write_to(&self.name, writer));
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CopyRect {
+    pub src_x_position: u16,
+    pub src_y_position: u16,
+}
+
+impl Message for CopyRect {
+    fn read_from<R: Read>(reader: &mut R) -> Result<CopyRect> {
+        Ok(CopyRect {
+            src_x_position: try!(reader.read_u16::<BigEndian>()),
+            src_y_position: try!(reader.read_u16::<BigEndian>())
+        })
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        try!(writer.write_u16::<BigEndian>(self.src_x_position));
+        try!(writer.write_u16::<BigEndian>(self.src_y_position));
         Ok(())
     }
 }
@@ -428,7 +449,7 @@ impl Message for C2S {
                 try!(writer.write(&[0u8; 1]));
                 try!(writer.write_u16::<BigEndian>(encodings.len() as u16)); // TODO: check?
                 for encoding in encodings {
-                    Encoding::write_to(encoding, writer);
+                    try!(Encoding::write_to(encoding, writer));
                 }
             },
             &C2S::FramebufferUpdateRequest { incremental, x_position, y_position, width, height } => {
@@ -442,6 +463,7 @@ impl Message for C2S {
             &C2S::KeyEvent { down, key } => {
                 try!(writer.write_u8(4));
                 try!(writer.write_u8(if down { 1 } else { 0 }));
+                try!(writer.write(&[0u8; 2]));
                 try!(writer.write_u32::<BigEndian>(key));
             },
             &C2S::PointerEvent { button_mask, x_position, y_position } => {

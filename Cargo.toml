@@ -8,6 +8,7 @@ authors = ["whitequark <whitequark@whitequark.org>"]
 log = "^0.3"
 byteorder = "^0.4"
 # binary deps
+env_logger = "^0.3"
 clap = "^1.5"
 sdl2 = "^0.13"
-env_logger = "^0.3"
+x11 = "^2.3"

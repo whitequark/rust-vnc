@@ -2,25 +2,12 @@ extern crate env_logger;
 #[macro_use] extern crate log;
 #[macro_use] extern crate clap;
 extern crate vnc;
+extern crate sdl2;
+extern crate x11;
 
 use clap::{Arg, App};
-
-fn authenticate(methods: &[vnc::AuthMethod]) -> Option<vnc::AuthChoice> {
-    for method in methods {
-        match method {
-            &vnc::AuthMethod::None => return Some(vnc::AuthChoice::None),
-            _ => ()
-        }
-    }
-    None
-}
-
-fn connect(host: &str, port: u16) -> vnc::Result<()> {
-    info!("connecting to {}:{}", host, port);
-    let stream = try!(std::net::TcpStream::connect((host, port)));
-    let vnc = try!(vnc::Client::from_tcp_stream(stream, authenticate, false));
-    Ok(())
-}
+use sdl2::pixels::{PixelMasks, PixelFormatEnum};
+use sdl2::rect::Rect as SdlRect;
 
 fn main() {
     env_logger::init().unwrap();
@@ -39,5 +26,322 @@ fn main() {
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
 
-    connect(host, port).unwrap();
+    let sdl_context = sdl2::init().unwrap();
+    let sdl_video = sdl_context.video().unwrap();
+    let mut sdl_timer = sdl_context.timer().unwrap();
+    let mut sdl_events = sdl_context.event_pump().unwrap();
+
+    info!("connecting to {}:{}", host, port);
+    let stream =
+        match std::net::TcpStream::connect((host, port)) {
+            Ok(stream) => stream,
+            Err(error) => {
+                error!("cannot connect to {}:{}: {}", host, port, error);
+                std::process::exit(1)
+            }
+        };
+
+    let mut vnc =
+        match vnc::Client::from_tcp_stream(stream, |methods| {
+            for method in methods {
+                match method {
+                    &vnc::AuthMethod::None => return Some(vnc::AuthChoice::None),
+                    _ => ()
+                }
+            }
+            None
+        }, true) {
+            Ok(vnc) => vnc,
+            Err(error) => {
+                error!("cannot initialize VNC session: {}", error);
+                std::process::exit(1)
+            }
+        };
+
+    let (mut width, mut height) = vnc.size();
+    info!("connected to \"{}\", {}x{} framebuffer", vnc.name(), width, height);
+
+    let vnc_format = vnc.format();
+    info!("received {:?}", vnc_format);
+
+    if !vnc_format.true_colour {
+        error!("only true color pixel formats are supported");
+        std::process::exit(1)
+    }
+
+    match vnc_format.bits_per_pixel {
+        16 | 24 | 32 => (),
+        n => {
+            error!("{}-bit color is not supported", n);
+            std::process::exit(1)
+        }
+    }
+
+    let sdl_format = PixelFormatEnum::from_masks(PixelMasks {
+        bpp:   vnc_format.bits_per_pixel,
+        rmask: (vnc_format.red_max as u32) << vnc_format.red_shift,
+        gmask: (vnc_format.green_max as u32) << vnc_format.green_shift,
+        bmask: (vnc_format.blue_max as u32) << vnc_format.blue_shift,
+        amask: 0
+    });
+    info!("rendering to a {:?} texture", sdl_format);
+
+    let window = sdl_video.window(&format!("{} - {}:{} - RVNC", vnc.name(), host, port),
+                                  width as u32, height as u32).build().unwrap();
+    let mut renderer = window.renderer().build().unwrap();
+    let mut target = renderer.create_texture_streaming(
+        sdl_format, (width as u32, height as u32)).unwrap();
+
+    renderer.clear();
+    vnc.enable_copy_pixels().unwrap();
+    vnc.enable_resize().unwrap();
+    vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+                       false).unwrap();
+
+    let (mut mouse_x, mut mouse_y) = (0u16, 0u16);
+    let mut mouse_buttons = 0u8;
+
+    let mut incremental = true;
+    'running: loop {
+        const FRAME_MS: u32 = 1000 / 60;
+        let ticks = sdl_timer.ticks();
+
+        for event in vnc.poll_iter() {
+            use vnc::ClientEvent;
+
+            match event {
+                ClientEvent::Disconnected => break 'running,
+                ClientEvent::Resize(new_width, new_height) => {
+                    width  = new_width;
+                    height = new_height;
+                    renderer.window_mut().unwrap().set_size(width as u32, height as u32);
+                    target = renderer.create_texture_streaming(
+                        sdl_format, (width as u32, height as u32)).unwrap();
+                    incremental = false;
+                },
+                ClientEvent::PutPixels(vnc_rect, ref pixels) => {
+                    let sdl_rect = SdlRect::new_unwrap(
+                        vnc_rect.left as i32, vnc_rect.top as i32,
+                        vnc_rect.width as u32, vnc_rect.height as u32);
+                    let stride = vnc_rect.width as usize * vnc_format.bits_per_pixel as usize / 8;
+                    target.update(Some(sdl_rect), pixels, stride).unwrap();
+                    renderer.copy(&target, Some(sdl_rect), Some(sdl_rect));
+                    match (incremental, vnc_rect) {
+                        (false, vnc::Rect { left: 0, top: 0, width: upd_width, height: upd_height })
+                                if upd_width == width && upd_height == height =>
+                            incremental = true,
+                        _ => ()
+                    }
+                },
+                ClientEvent::CopyPixels { src: vnc_src, dst: vnc_dst } => {
+                    let sdl_src = SdlRect::new_unwrap(
+                        vnc_src.left as i32, vnc_src.top as i32,
+                        vnc_src.width as u32, vnc_src.height as u32);
+                    let sdl_dst = SdlRect::new_unwrap(
+                        vnc_dst.left as i32, vnc_dst.top as i32,
+                        vnc_dst.width as u32, vnc_dst.height as u32);
+                    let pixels = renderer.read_pixels(Some(sdl_src), sdl_format).unwrap();
+                    let stride = vnc_dst.width as usize * vnc_format.bits_per_pixel as usize / 8;
+                    target.update(Some(sdl_dst), &pixels, stride).unwrap();
+                    renderer.copy(&target, Some(sdl_dst), Some(sdl_dst));
+                },
+                ClientEvent::Clipboard(ref text) => {
+                    let _ = sdl_video.clipboard().set_clipboard_text(text);
+                    // this returns a Result, but unwrapping it fails with "Invalid renderer",
+                    // even though the call to set_clipboard_text actually succeeds.
+                }
+                _ => () /* ignore unsupported events */
+            }
+        }
+
+        renderer.present();
+
+        for event in sdl_events.wait_timeout_iter(sdl_timer.ticks() - ticks + FRAME_MS) {
+            use sdl2::event::{Event, WindowEventId};
+
+            match event {
+                Event::Quit { .. } => break 'running,
+                Event::Window { win_event_id: WindowEventId::Exposed, .. } => {
+                    renderer.present()
+                },
+                Event::KeyDown { scancode: Some(scancode), .. } => {
+                    sdl_to_x11(scancode).map(|key| vnc.send_key_event(true, key).unwrap());
+                },
+                Event::KeyUp { scancode: Some(scancode), .. } => {
+                    sdl_to_x11(scancode).map(|key| vnc.send_key_event(false, key).unwrap());
+                },
+                Event::MouseMotion { x, y, .. } => {
+                    mouse_x = x as u16;
+                    mouse_y = y as u16;
+                    vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap()
+                },
+                Event::MouseButtonDown { x, y, mouse_btn, .. } |
+                Event::MouseButtonUp { x, y, mouse_btn, .. } => {
+                    use sdl2::mouse::Mouse;
+                    mouse_x = x as u16;
+                    mouse_y = y as u16;
+                    let mouse_button =
+                        match mouse_btn {
+                            Mouse::Left       => 0x01,
+                            Mouse::Middle     => 0x02,
+                            Mouse::Right      => 0x04,
+                            Mouse::X1         => 0x20,
+                            Mouse::X2         => 0x40,
+                            Mouse::Unknown(_) => 0x00
+                        };
+                    match event {
+                        Event::MouseButtonDown { .. } => mouse_buttons |= mouse_button,
+                        Event::MouseButtonUp   { .. } => mouse_buttons &= !mouse_button,
+                        _ => unreachable!()
+                    };
+                    vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap()
+                },
+                Event::MouseWheel { y, .. } => {
+                    if y == 1 {
+                        vnc.send_pointer_event(mouse_buttons | 0x08, mouse_x, mouse_y).unwrap();
+                        vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap();
+                    } else if y == -1 {
+                        vnc.send_pointer_event(mouse_buttons | 0x10, mouse_x, mouse_y).unwrap();
+                        vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap();
+                    }
+                }
+                Event::ClipboardUpdate { .. } => {
+                    vnc.update_clipboard(&sdl_video.clipboard().clipboard_text().unwrap()).unwrap()
+                },
+                _ => ()
+            }
+
+            if sdl_timer.ticks() - ticks > FRAME_MS { break }
+        }
+
+        vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+                           incremental).unwrap();
+    }
+}
+
+fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
+    use sdl2::keyboard::Scancode::*;
+    use x11::keysym::*;
+    let x11code = match keycode {
+        A => XK_a,
+        B => XK_b,
+        C => XK_c,
+        D => XK_d,
+        E => XK_e,
+        F => XK_f,
+        G => XK_g,
+        H => XK_h,
+        I => XK_i,
+        J => XK_j,
+        K => XK_k,
+        L => XK_l,
+        M => XK_m,
+        N => XK_n,
+        O => XK_o,
+        P => XK_p,
+        Q => XK_q,
+        R => XK_r,
+        S => XK_s,
+        T => XK_t,
+        U => XK_u,
+        V => XK_v,
+        W => XK_w,
+        X => XK_x,
+        Y => XK_y,
+        Z => XK_z,
+        Num1 => XK_1,
+        Num2 => XK_2,
+        Num3 => XK_3,
+        Num4 => XK_4,
+        Num5 => XK_5,
+        Num6 => XK_6,
+        Num7 => XK_7,
+        Num8 => XK_8,
+        Num9 => XK_9,
+        Num0 => XK_0,
+        Return => XK_Return,
+        Escape => XK_Escape,
+        Backspace => XK_BackSpace,
+        Tab => XK_Tab,
+        Space => XK_space,
+        Minus => XK_minus,
+        Equals => XK_equal,
+        LeftBracket => XK_bracketleft,
+        RightBracket => XK_bracketright,
+        Backslash => XK_backslash,
+        NonUsHash => 0,
+        Semicolon => XK_semicolon,
+        Apostrophe => XK_apostrophe,
+        Grave => XK_grave,
+        Comma => XK_comma,
+        Period => XK_period,
+        Slash => XK_slash,
+        CapsLock => XK_Caps_Lock,
+        F1 => XK_F1,
+        F2 => XK_F2,
+        F3 => XK_F3,
+        F4 => XK_F4,
+        F5 => XK_F5,
+        F6 => XK_F6,
+        F7 => XK_F7,
+        F8 => XK_F8,
+        F9 => XK_F9,
+        F10 => XK_F10,
+        F11 => XK_F11,
+        F12 => XK_F12,
+        PrintScreen => XK_Print,
+        ScrollLock => XK_Scroll_Lock,
+        Pause => XK_Pause,
+        Insert => XK_Insert,
+        Home => XK_Home,
+        PageUp => XK_Page_Up,
+        Delete => XK_Delete,
+        End => XK_End,
+        PageDown => XK_Page_Down,
+        Right => XK_Right,
+        Left => XK_Left,
+        Down => XK_Down,
+        Up => XK_Up,
+        NumLockClear => XK_Num_Lock,
+        KpDivide => XK_KP_Divide,
+        KpMultiply => XK_KP_Multiply,
+        KpMinus => XK_KP_Subtract,
+        KpPlus => XK_KP_Add,
+        KpEnter => XK_KP_Enter,
+        Kp1 => XK_KP_1,
+        Kp2 => XK_KP_2,
+        Kp3 => XK_KP_3,
+        Kp4 => XK_KP_4,
+        Kp5 => XK_KP_5,
+        Kp6 => XK_KP_6,
+        Kp7 => XK_KP_7,
+        Kp8 => XK_KP_8,
+        Kp9 => XK_KP_9,
+        Kp0 => XK_KP_0,
+        KpPeriod => XK_KP_Separator,
+        F13 => XK_F13,
+        F14 => XK_F14,
+        F15 => XK_F15,
+        F16 => XK_F16,
+        F17 => XK_F17,
+        F18 => XK_F18,
+        F19 => XK_F19,
+        F20 => XK_F20,
+        F21 => XK_F21,
+        F22 => XK_F22,
+        F23 => XK_F23,
+        F24 => XK_F24,
+        Menu => XK_Menu,
+        SysReq => XK_Sys_Req,
+        LCtrl => XK_Control_L,
+        LShift => XK_Shift_L,
+        LAlt => XK_Alt_L,
+        LGui => XK_Super_L,
+        RCtrl => XK_Control_R,
+        RShift => XK_Shift_R,
+        RAlt => XK_Alt_R,
+        RGui => XK_Super_R,
+        _ => 0
+    };
+    if x11code == 0 { None } else { Some(x11code as u32) }
 }

@@ -4,10 +4,84 @@ extern crate env_logger;
 extern crate vnc;
 extern crate sdl2;
 extern crate x11;
+extern crate byteorder;
 
+use std::io::{Read, Write, Cursor};
 use clap::{Arg, App};
-use sdl2::pixels::{PixelMasks, PixelFormatEnum};
+use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum};
 use sdl2::rect::Rect as SdlRect;
+use sdl2::render::BlendMode;
+use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+
+fn mask_cursor(in_format: PixelFormatEnum, in_pixels: Vec<u8>, mask_pixels: Vec<u8>) ->
+        (PixelFormatEnum, Vec<u8>) {
+    use sdl2::pixels::PixelFormatEnum::*;
+
+    let out_format =
+        match in_format {
+            ARGB4444 | RGBA4444 | ABGR4444 | BGRA4444 |
+            ARGB1555 | RGBA5551 | ABGR1555 | BGRA5551 |
+            ARGB8888 | RGBA8888 | ABGR8888 | BGRA8888 => in_format,
+            RGB444 => ARGB4444,
+            RGB555 => ARGB1555,
+            BGR555 => ABGR1555,
+            RGB24 | RGB888 | RGBX8888 => ARGB8888,
+            BGR24 | BGR888 | BGRX8888 => ABGR8888,
+            _ => panic!("cannot add alpha to {:?}", in_format)
+        };
+    let out_pixels = Vec::new();
+
+    let in_size    = in_format.byte_size_per_pixel();
+    let in_masks   = in_format.into_masks().unwrap();
+    let out_size   = out_format.byte_size_per_pixel();
+    let out_masks  = out_format.into_masks().unwrap();
+
+    let mut in_cursor   = Cursor::new(in_pixels);
+    let mut out_cursor  = Cursor::new(out_pixels);
+    let mut mask_cursor = Cursor::new(mask_pixels);
+
+    fn read_color<R: Read>(reader: &mut R, size: usize, masks: &PixelMasks) ->
+            byteorder::Result<Color> {
+        let packed = try!(reader.read_uint::<NativeEndian>(size));
+        Ok(Color::RGB(
+            ((packed as u32 & masks.rmask) >> masks.rmask.trailing_zeros()) as u8,
+            ((packed as u32 & masks.gmask) >> masks.gmask.trailing_zeros()) as u8,
+            ((packed as u32 & masks.bmask) >> masks.bmask.trailing_zeros()) as u8
+        ))
+    }
+
+    fn write_color<W: Write>(writer: &mut W, size: usize, masks: &PixelMasks, color: Color) ->
+            byteorder::Result<()> {
+        let packed = match color {
+            Color::RGBA(r, g, b, a) => {
+                ((r as u64) << masks.rmask.trailing_zeros()) |
+                ((g as u64) << masks.gmask.trailing_zeros()) |
+                ((b as u64) << masks.bmask.trailing_zeros()) |
+                ((a as u64) << masks.amask.trailing_zeros())
+            },
+            _ => unreachable!()
+        };
+        writer.write_uint::<NativeEndian>(packed, size).unwrap();
+        Ok(())
+    }
+
+    loop {
+        match read_color(&mut in_cursor, in_size, &in_masks) {
+            Err(byteorder::Error::UnexpectedEOF) => break,
+            Err(_) => unreachable!(),
+            Ok(in_color) => {
+                let mask = mask_cursor.read_u8().unwrap();
+                let out_color = match in_color {
+                    Color::RGB (r, g, b) | Color::RGBA(r, g, b, _) =>
+                        Color::RGBA(r, g, b, if mask != 0 { 255 } else { 0 })
+                };
+                write_color(&mut out_cursor, out_size, &out_masks, out_color).unwrap();
+            }
+        }
+    }
+
+    (out_format, out_cursor.into_inner())
+}
 
 fn main() {
     env_logger::init().unwrap();
@@ -44,6 +118,7 @@ fn main() {
     let mut vnc =
         match vnc::ClientBuilder::new()
                  .copy_rect(true)
+                 .set_cursor(true)
                  .resize(true)
                  .from_tcp_stream(stream, |methods| {
             for method in methods {
@@ -92,20 +167,31 @@ fn main() {
     let window = sdl_video.window(&format!("{} - {}:{} - RVNC", vnc.name(), host, port),
                                   width as u32, height as u32).build().unwrap();
     let mut renderer = window.renderer().build().unwrap();
-    let mut target = renderer.create_texture_streaming(
+
+    let mut screen = renderer.create_texture_streaming(
         sdl_format, (width as u32, height as u32)).unwrap();
+
+    let mut cursor = None;
+    let mut cursor_rect = None;
+    let (mut hotspot_x, mut hotspot_y) = (0u16, 0u16);
+
+    let mut mouse_buttons = 0u8;
+    let (mut mouse_x,   mut mouse_y)   = (0u16, 0u16);
 
     renderer.clear();
     vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
                        false).unwrap();
 
-    let (mut mouse_x, mut mouse_y) = (0u16, 0u16);
-    let mut mouse_buttons = 0u8;
-
     let mut incremental = true;
     'running: loop {
         const FRAME_MS: u32 = 1000 / 60;
         let ticks = sdl_timer.ticks();
+
+        match cursor_rect {
+            Some(cursor_rect) =>
+                renderer.copy(&screen, Some(cursor_rect), Some(cursor_rect)),
+            None => ()
+        }
 
         for event in vnc.poll_iter() {
             use vnc::ClientEvent;
@@ -116,7 +202,7 @@ fn main() {
                     width  = new_width;
                     height = new_height;
                     renderer.window_mut().unwrap().set_size(width as u32, height as u32);
-                    target = renderer.create_texture_streaming(
+                    screen = renderer.create_texture_streaming(
                         sdl_format, (width as u32, height as u32)).unwrap();
                     incremental = false;
                 },
@@ -124,9 +210,9 @@ fn main() {
                     let sdl_rect = SdlRect::new_unwrap(
                         vnc_rect.left as i32, vnc_rect.top as i32,
                         vnc_rect.width as u32, vnc_rect.height as u32);
-                    let stride = vnc_rect.width as usize * vnc_format.bits_per_pixel as usize / 8;
-                    target.update(Some(sdl_rect), pixels, stride).unwrap();
-                    renderer.copy(&target, Some(sdl_rect), Some(sdl_rect));
+                    screen.update(Some(sdl_rect), pixels,
+                        sdl_format.byte_size_of_pixels(vnc_rect.width as usize)).unwrap();
+                    renderer.copy(&screen, Some(sdl_rect), Some(sdl_rect));
                     match (incremental, vnc_rect) {
                         (false, vnc::Rect { left: 0, top: 0, width: upd_width, height: upd_height })
                                 if upd_width == width && upd_height == height =>
@@ -142,16 +228,73 @@ fn main() {
                         vnc_dst.left as i32, vnc_dst.top as i32,
                         vnc_dst.width as u32, vnc_dst.height as u32);
                     let pixels = renderer.read_pixels(Some(sdl_src), sdl_format).unwrap();
-                    let stride = vnc_dst.width as usize * vnc_format.bits_per_pixel as usize / 8;
-                    target.update(Some(sdl_dst), &pixels, stride).unwrap();
-                    renderer.copy(&target, Some(sdl_dst), Some(sdl_dst));
+                    screen.update(Some(sdl_dst), &pixels,
+                        sdl_format.byte_size_of_pixels(vnc_dst.width as usize)).unwrap();
+                    renderer.copy(&screen, Some(sdl_dst), Some(sdl_dst));
                 },
                 ClientEvent::Clipboard(ref text) => {
                     let _ = sdl_video.clipboard().set_clipboard_text(text);
                     // this returns a Result, but unwrapping it fails with "Invalid renderer",
                     // even though the call to set_clipboard_text actually succeeds.
+                },
+                ClientEvent::SetCursor {
+                    size:    (width, height),
+                    hotspot: (new_hotspot_x, new_hotspot_y),
+                    pixels,
+                    mask_bits
+                } => {
+                    hotspot_x = new_hotspot_x;
+                    hotspot_y = new_hotspot_y;
+                    if width > 0 && height > 0 {
+                        let mut mask_pixels = Vec::new();
+                        let mask_stride = (width + 7) / 8;
+                        for y in 0..height {
+                            for x in 0..mask_stride {
+                                let mask_byte = mask_bits[(y * mask_stride + x) as usize];
+                                for w in 0..8 {
+                                    mask_pixels.push(mask_byte & (1 << (7 - w)))
+                                }
+                            }
+                        }
+                        let (sdl_cursor_format, cursor_pixels) =
+                            mask_cursor(sdl_format, pixels, mask_pixels);
+                        let mut new_cursor = renderer.create_texture_streaming(
+                            sdl_cursor_format, (width as u32, height as u32)).unwrap();
+                        new_cursor.update(None, &cursor_pixels,
+                            sdl_cursor_format.byte_size_of_pixels(width as usize)).unwrap();
+                        new_cursor.set_blend_mode(BlendMode::Blend);
+                        cursor = Some(new_cursor);
+                    } else {
+                        cursor = None
+                    }
                 }
                 _ => () /* ignore unsupported events */
+            }
+        }
+
+        match cursor {
+            Some(ref cursor) => {
+                sdl_context.mouse().show_cursor(false);
+
+                let raw_cursor_rect = SdlRect::new_unwrap(
+                    mouse_x as i32 - hotspot_x as i32, mouse_y as i32 - hotspot_y as i32,
+                    cursor.query().width as u32, cursor.query().height as u32);
+                let screen_rect = SdlRect::new_unwrap(
+                    0, 0, width as u32, height as u32);
+                let clipped_cursor_rect = (raw_cursor_rect & screen_rect).unwrap();
+                let source_rect = SdlRect::new_unwrap(
+                    clipped_cursor_rect.x() - raw_cursor_rect.x(),
+                    clipped_cursor_rect.y() - raw_cursor_rect.y(),
+                    clipped_cursor_rect.width(),
+                    clipped_cursor_rect.height());
+
+                renderer.copy(&cursor, Some(source_rect), Some(clipped_cursor_rect));
+                cursor_rect = Some(clipped_cursor_rect);
+            },
+            None => {
+                sdl_context.mouse().show_cursor(true);
+
+                cursor_rect = None;
             }
         }
 

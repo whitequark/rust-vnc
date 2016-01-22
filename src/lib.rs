@@ -40,6 +40,7 @@ pub enum ClientEvent {
     Resize(u16, u16),
     PutPixels(Rect, Vec<u8>),
     CopyPixels { src: Rect, dst: Rect },
+    SetCursor { size: (u16, u16), hotspot: (u16, u16), pixels: Vec<u8>, mask_bits: Vec<u8> },
     Clipboard(String),
     Bell,
 }
@@ -91,6 +92,21 @@ impl ClientEvent {
                                 height: rectangle.height
                             };
                             ClientEvent::CopyPixels { src: src, dst: dst }
+                        },
+                        protocol::Encoding::Cursor => {
+                            let mut pixels    = vec![0; (rectangle.width as usize) *
+                                                        (rectangle.height as usize) *
+                                                        (format.bits_per_pixel as usize / 8)];
+                            try!(stream.read_exact(&mut pixels));
+                            let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
+                                                        (rectangle.height as usize)];
+                            try!(stream.read_exact(&mut mask_bits));
+                            ClientEvent::SetCursor {
+                                size:      (rectangle.width, rectangle.height),
+                                hotspot:   (rectangle.x_position, rectangle.y_position),
+                                pixels:    pixels,
+                                mask_bits: mask_bits
+                            }
                         },
                         protocol::Encoding::DesktopSize =>
                             ClientEvent::Resize(rectangle.width, rectangle.height),
@@ -273,6 +289,10 @@ impl Client {
 
     pub fn enable_copy_pixels(&mut self) -> Result<()> {
         self.enable_encodings(&[protocol::Encoding::CopyRect])
+    }
+
+    pub fn enable_cursor(&mut self) -> Result<()> {
+        self.enable_encodings(&[protocol::Encoding::Cursor])
     }
 
     pub fn enable_resize(&mut self) -> Result<()> {

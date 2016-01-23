@@ -166,8 +166,9 @@ fn main() {
 
     let window = sdl_video.window(&format!("{} - {}:{} - RVNC", vnc.name(), host, port),
                                   width as u32, height as u32).build().unwrap();
-    let mut renderer = window.renderer().build().unwrap();
+    sdl_video.text_input().start();
 
+    let mut renderer = window.renderer().build().unwrap();
     let mut screen = renderer.create_texture_streaming(
         sdl_format, (width as u32, height as u32)).unwrap();
 
@@ -177,6 +178,8 @@ fn main() {
 
     let mut mouse_buttons = 0u8;
     let (mut mouse_x,   mut mouse_y)   = (0u16, 0u16);
+
+    let mut key_ctrl = false;
 
     renderer.clear();
     vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
@@ -308,12 +311,24 @@ fn main() {
                 Event::Window { win_event_id: WindowEventId::Exposed, .. } => {
                     renderer.present()
                 },
-                Event::KeyDown { scancode: Some(scancode), .. } => {
-                    sdl_to_x11(scancode).map(|key| vnc.send_key_event(true, key).unwrap());
+                Event::KeyDown { keycode: Some(keycode), .. } |
+                Event::KeyUp { keycode: Some(keycode), .. } => {
+                    use sdl2::keyboard::Keycode;
+                    let down = match event { Event::KeyDown { .. } => true, _ => false };
+                    match keycode {
+                        Keycode::LCtrl | Keycode::RCtrl => key_ctrl = down,
+                        _ => ()
+                    }
+                    match map_special_key(key_ctrl, keycode) {
+                        Some(keysym) => { vnc.send_key_event(down, keysym).unwrap() },
+                        None => ()
+                    }
                 },
-                Event::KeyUp { scancode: Some(scancode), .. } => {
-                    sdl_to_x11(scancode).map(|key| vnc.send_key_event(false, key).unwrap());
-                },
+                Event::TextInput { text, .. } => {
+                    let chr = 0x01000000 + text.chars().next().unwrap() as u32;
+                    vnc.send_key_event(true, chr).unwrap();
+                    vnc.send_key_event(false, chr).unwrap()
+                }
                 Event::MouseMotion { x, y, .. } => {
                     mouse_x = x as u16;
                     mouse_y = y as u16;
@@ -363,10 +378,50 @@ fn main() {
     }
 }
 
-fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
-    use sdl2::keyboard::Scancode::*;
+fn map_special_key(alnum_ok: bool, keycode: sdl2::keyboard::Keycode) -> Option<u32> {
+    use sdl2::keyboard::Keycode::*;
     use x11::keysym::*;
+
     let x11code = match keycode {
+        Space => XK_space,
+        Exclaim => XK_exclam,
+        Quotedbl => XK_quotedbl,
+        Hash => XK_numbersign,
+        Dollar => XK_dollar,
+        Percent => XK_percent,
+        Ampersand => XK_ampersand,
+        Quote => XK_apostrophe,
+        LeftParen => XK_parenleft,
+        RightParen => XK_parenright,
+        Asterisk => XK_asterisk,
+        Plus => XK_plus,
+        Comma => XK_comma,
+        Minus => XK_minus,
+        Period => XK_period,
+        Slash => XK_slash,
+        Num0 => XK_0,
+        Num1 => XK_1,
+        Num2 => XK_2,
+        Num3 => XK_3,
+        Num4 => XK_4,
+        Num5 => XK_5,
+        Num6 => XK_6,
+        Num7 => XK_7,
+        Num8 => XK_8,
+        Num9 => XK_9,
+        Colon => XK_colon,
+        Semicolon => XK_semicolon,
+        Less => XK_less,
+        Equals => XK_equal,
+        Greater => XK_greater,
+        Question => XK_question,
+        At => XK_at,
+        LeftBracket => XK_bracketleft,
+        Backslash => XK_backslash,
+        RightBracket => XK_bracketright,
+        Caret => XK_caret,
+        Underscore => XK_underscore,
+        Backquote => XK_grave,
         A => XK_a,
         B => XK_b,
         C => XK_c,
@@ -393,33 +448,16 @@ fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
         X => XK_x,
         Y => XK_y,
         Z => XK_z,
-        Num1 => XK_1,
-        Num2 => XK_2,
-        Num3 => XK_3,
-        Num4 => XK_4,
-        Num5 => XK_5,
-        Num6 => XK_6,
-        Num7 => XK_7,
-        Num8 => XK_8,
-        Num9 => XK_9,
-        Num0 => XK_0,
-        Return => XK_Return,
-        Escape => XK_Escape,
+        _ => 0
+    };
+    if x11code != 0 && alnum_ok { return Some(x11code as u32) }
+
+    let x11code = match keycode {
         Backspace => XK_BackSpace,
         Tab => XK_Tab,
-        Space => XK_space,
-        Minus => XK_minus,
-        Equals => XK_equal,
-        LeftBracket => XK_bracketleft,
-        RightBracket => XK_bracketright,
-        Backslash => XK_backslash,
-        NonUsHash => 0,
-        Semicolon => XK_semicolon,
-        Apostrophe => XK_apostrophe,
-        Grave => XK_grave,
-        Comma => XK_comma,
-        Period => XK_period,
-        Slash => XK_slash,
+        Return => XK_Return,
+        Escape => XK_Escape,
+        Delete => XK_Delete,
         CapsLock => XK_Caps_Lock,
         F1 => XK_F1,
         F2 => XK_F2,
@@ -439,7 +477,6 @@ fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
         Insert => XK_Insert,
         Home => XK_Home,
         PageUp => XK_Page_Up,
-        Delete => XK_Delete,
         End => XK_End,
         PageDown => XK_Page_Down,
         Right => XK_Right,
@@ -476,7 +513,7 @@ fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
         F23 => XK_F23,
         F24 => XK_F24,
         Menu => XK_Menu,
-        SysReq => XK_Sys_Req,
+        Sysreq => XK_Sys_Req,
         LCtrl => XK_Control_L,
         LShift => XK_Shift_L,
         LAlt => XK_Alt_L,
@@ -487,5 +524,5 @@ fn sdl_to_x11(keycode: sdl2::keyboard::Scancode) -> Option<u32> {
         RGui => XK_Super_R,
         _ => 0
     };
-    if x11code == 0 { None } else { Some(x11code as u32) }
+    if x11code != 0 { Some(x11code as u32) } else { None }
 }

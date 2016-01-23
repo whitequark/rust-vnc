@@ -539,7 +539,7 @@ impl Proxy {
                                                              (format.bits_per_pixel as usize / 8)];
                                     try!(server_stream.read_exact(&mut pixels));
                                     debug!("c<-s ...raw pixels");
-                                    try!(buffer_stream.write(&pixels));
+                                    try!(buffer_stream.write_all(&pixels));
                                 },
                                 protocol::Encoding::CopyRect => {
                                     let copy_rect =
@@ -558,11 +558,11 @@ impl Proxy {
                                                                 (rectangle.height as usize) *
                                                                 (format.bits_per_pixel as usize / 8)];
                                     try!(server_stream.read_exact(&mut pixels));
-                                    try!(buffer_stream.write(&pixels));
+                                    try!(buffer_stream.write_all(&pixels));
                                     let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
                                                                 (rectangle.height as usize)];
                                     try!(server_stream.read_exact(&mut mask_bits));
-                                    try!(buffer_stream.write(&mask_bits));
+                                    try!(buffer_stream.write_all(&mask_bits));
                                 },
                                 protocol::Encoding::DesktopSize => (),
                                 _ => return Err(Error::UnexpectedValue("encoding"))
@@ -573,7 +573,7 @@ impl Proxy {
                 }
 
                 let buffer = buffer_stream.into_inner();
-                try!(client_stream.write(&buffer));
+                try!(client_stream.write_all(&buffer));
             }
         }
 

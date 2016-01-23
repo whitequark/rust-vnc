@@ -91,7 +91,7 @@ impl Message for Vec<u8> {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let length = self.len() as u32; // TODO: check?
         try!(writer.write_u32::<BigEndian>(length));
-        try!(writer.write(&self));
+        try!(writer.write_all(&self));
         Ok(())
     }
 }
@@ -109,7 +109,7 @@ impl Message for String {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let length = self.len() as u32; // TODO: check?
         try!(writer.write_u32::<BigEndian>(length));
-        try!(writer.write(&self.chars().map(|c| c as u8).collect::<Vec<u8>>()));
+        try!(writer.write_all(&self.chars().map(|c| c as u8).collect::<Vec<u8>>()));
         Ok(())
     }
 }
@@ -135,9 +135,9 @@ impl Message for Version {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         try!(match self {
-            &Version::Rfb33 => writer.write(b"RFB 003.003\n"),
-            &Version::Rfb37 => writer.write(b"RFB 003.007\n"),
-            &Version::Rfb38 => writer.write(b"RFB 003.008\n"),
+            &Version::Rfb33 => writer.write_all(b"RFB 003.003\n"),
+            &Version::Rfb37 => writer.write_all(b"RFB 003.007\n"),
+            &Version::Rfb38 => writer.write_all(b"RFB 003.008\n"),
         });
         Ok(())
     }
@@ -286,7 +286,7 @@ impl Message for PixelFormat {
         try!(writer.write_u8(self.red_shift));
         try!(writer.write_u8(self.green_shift));
         try!(writer.write_u8(self.blue_shift));
-        try!(writer.write(&[0u8; 3]));
+        try!(writer.write_all(&[0u8; 3]));
         Ok(())
     }
 }
@@ -463,12 +463,12 @@ impl Message for C2S {
         match self {
             &C2S::SetPixelFormat(ref pixel_format) => {
                 try!(writer.write_u8(0));
-                try!(writer.write(&[0u8; 3]));
+                try!(writer.write_all(&[0u8; 3]));
                 try!(PixelFormat::write_to(pixel_format, writer));
             },
             &C2S::SetEncodings(ref encodings) => {
                 try!(writer.write_u8(2));
-                try!(writer.write(&[0u8; 1]));
+                try!(writer.write_all(&[0u8; 1]));
                 try!(writer.write_u16::<BigEndian>(encodings.len() as u16)); // TODO: check?
                 for encoding in encodings {
                     try!(Encoding::write_to(encoding, writer));
@@ -485,7 +485,7 @@ impl Message for C2S {
             &C2S::KeyEvent { down, key } => {
                 try!(writer.write_u8(4));
                 try!(writer.write_u8(if down { 1 } else { 0 }));
-                try!(writer.write(&[0u8; 2]));
+                try!(writer.write_all(&[0u8; 2]));
                 try!(writer.write_u32::<BigEndian>(key));
             },
             &C2S::PointerEvent { button_mask, x_position, y_position } => {
@@ -611,12 +611,12 @@ impl Message for S2C {
         match self {
             &S2C::FramebufferUpdate { count } => {
                 try!(writer.write_u8(0));
-                try!(writer.write(&[0u8; 1]));
+                try!(writer.write_all(&[0u8; 1]));
                 try!(writer.write_u16::<BigEndian>(count));
             },
             &S2C::SetColourMapEntries { first_colour, ref colours } => {
                 try!(writer.write_u8(1));
-                try!(writer.write(&[0u8; 1]));
+                try!(writer.write_all(&[0u8; 1]));
                 try!(writer.write_u16::<BigEndian>(first_colour));
                 for colour in colours {
                     try!(Colour::write_to(colour, writer));
@@ -627,7 +627,7 @@ impl Message for S2C {
             },
             &S2C::CutText(ref text) => {
                 try!(writer.write_u8(3));
-                try!(writer.write(&[0u8; 3]));
+                try!(writer.write_all(&[0u8; 3]));
                 try!(String::write_to(text, writer));
             }
         }

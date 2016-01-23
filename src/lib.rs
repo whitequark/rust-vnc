@@ -1,3 +1,5 @@
+// https://github.com/rust-lang/rust/issues/27585;
+// after that, https://github.com/BurntSushi/byteorder/pull/40.
 #![feature(read_exact)]
 
 #[macro_use] extern crate log;

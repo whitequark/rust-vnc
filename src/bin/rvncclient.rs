@@ -89,11 +89,11 @@ fn main() {
     let matches = App::new("rvncclient")
         .about("VNC client")
         .arg(Arg::with_name("HOST")
-                .help("VNC server hostname or IP")
+                .help("server hostname or IP")
                 .required(true)
                 .index(1))
         .arg(Arg::with_name("PORT")
-                .help("VNC server port")
+                .help("server port (default: 5900)")
                 .index(2))
         .get_matches();
 

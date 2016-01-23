@@ -11,6 +11,7 @@ pub enum Error {
 
     UnexpectedEOF,
     UnexpectedValue(&'static str),
+    Disconnected,
     AuthenticationUnavailable,
     AuthenticationFailure(String),
     Server(String)
@@ -39,6 +40,7 @@ impl std::error::Error for Error {
             &Error::FromUtf8(ref inner) => inner.description(),
             &Error::UnexpectedEOF => "unexpected EOF",
             &Error::UnexpectedValue(_) => "unexpected value",
+            &Error::Disconnected => "graceful disconnect",
             &Error::AuthenticationUnavailable => "authentication unavailable",
             &Error::AuthenticationFailure(_) => "authentication failure",
             &Error::Server(_) => "server error",
@@ -78,14 +80,30 @@ pub trait Message {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()>;
 }
 
+impl Message for Vec<u8> {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
+        let length = try!(reader.read_u32::<BigEndian>());
+        let mut buffer = vec![0; length as usize];
+        try!(reader.read_exact(&mut buffer));
+        Ok(buffer)
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let length = self.len() as u32; // TODO: check?
+        try!(writer.write_u32::<BigEndian>(length));
+        try!(writer.write(&self));
+        Ok(())
+    }
+}
+
 /* All strings in VNC are either ASCII or Latin-1, both of which
    are embedded in Unicode. */
 impl Message for String {
     fn read_from<R: Read>(reader: &mut R) -> Result<String> {
         let length = try!(reader.read_u32::<BigEndian>());
-        let mut reason = vec![0; length as usize];
-        try!(reader.read_exact(&mut reason));
-        Ok(reason.iter().map(|c| *c as char).collect())
+        let mut string = vec![0; length as usize];
+        try!(reader.read_exact(&mut string));
+        Ok(string.iter().map(|c| *c as char).collect())
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -393,7 +411,11 @@ pub enum C2S {
 
 impl Message for C2S {
     fn read_from<R: Read>(reader: &mut R) -> Result<C2S> {
-        let message_type = try!(reader.read_u8());
+        let message_type =
+            match reader.read_u8() {
+                Err(byteorder::Error::UnexpectedEOF) => return Err(Error::Disconnected),
+                result => try!(result)
+            };
         match message_type {
             0 => {
                 try!(reader.read_exact(&mut [0u8; 3]));
@@ -552,7 +574,11 @@ pub enum S2C {
 
 impl Message for S2C {
     fn read_from<R: Read>(reader: &mut R) -> Result<S2C> {
-        let message_type = try!(reader.read_u8());
+        let message_type =
+            match reader.read_u8() {
+                Err(byteorder::Error::UnexpectedEOF) => return Err(Error::Disconnected),
+                result => try!(result)
+            };
         match message_type {
             0 => {
                 try!(reader.read_exact(&mut [0u8; 1]));

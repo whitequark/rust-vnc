@@ -282,25 +282,6 @@ impl Client {
     pub fn size(&self) -> (u16, u16) { self.size }
     pub fn format(&self) -> PixelFormat { self.format.clone() }
 
-    fn enable_encodings(&mut self, encodings: &[protocol::Encoding]) -> Result<()> {
-        let set_encodings = protocol::C2S::SetEncodings(Vec::from(encodings));
-        debug!("-> {:?}", set_encodings);
-        try!(protocol::C2S::write_to(&set_encodings, &mut self.stream));
-        Ok(())
-    }
-
-    pub fn enable_copy_pixels(&mut self) -> Result<()> {
-        self.enable_encodings(&[protocol::Encoding::CopyRect])
-    }
-
-    pub fn enable_cursor(&mut self) -> Result<()> {
-        self.enable_encodings(&[protocol::Encoding::Cursor])
-    }
-
-    pub fn enable_resize(&mut self) -> Result<()> {
-        self.enable_encodings(&[protocol::Encoding::DesktopSize])
-    }
-
     pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {
             incremental: incremental,

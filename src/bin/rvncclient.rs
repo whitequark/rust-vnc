@@ -389,7 +389,9 @@ fn main() {
                 Event::MouseMotion { x, y, .. } => {
                     mouse_x = x as u16;
                     mouse_y = y as u16;
-                    vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap()
+                    if !qemu_hacks {
+                        vnc.send_pointer_event(mouse_buttons, mouse_x, mouse_y).unwrap()
+                    }
                 },
                 Event::MouseButtonDown { x, y, mouse_btn, .. } |
                 Event::MouseButtonUp { x, y, mouse_btn, .. } => {

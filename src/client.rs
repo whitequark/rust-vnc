@@ -322,6 +322,19 @@ impl Client {
         Ok(())
     }
 
+    // Note that due to inherent weaknesses of the VNC protocol, this
+    // function is prone to race conditions that break the connection framing.
+    // The ZRLE encoding is self-delimiting and if both the client and server
+    // support it, there can be no race condition, but we currently don't.
+    pub fn set_format(&mut self, format: protocol::PixelFormat) -> Result<()> {
+        let set_pixel_format = protocol::C2S::SetPixelFormat(self.format.clone());
+        debug!("-> {:?}", set_pixel_format);
+        try!(protocol::C2S::write_to(&set_pixel_format, &mut self.stream));
+
+        self.format = format;
+        Ok(())
+    }
+
     pub fn poll_event(&mut self) -> Option<Event> {
         match self.events.try_recv() {
             Err(TryRecvError::Empty) |

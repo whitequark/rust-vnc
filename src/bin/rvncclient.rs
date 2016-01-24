@@ -95,10 +95,14 @@ fn main() {
         .arg(Arg::with_name("PORT")
                 .help("server port (default: 5900)")
                 .index(2))
+        .arg(Arg::with_name("QEMU-HACKS")
+                .help("hack around QEMU/XenHVM's braindead VNC server")
+                .long("heinous-qemu-hacks"))
         .get_matches();
 
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
+    let qemu_hacks = matches.is_present("QEMU-HACKS");
 
     let sdl_context = sdl2::init().unwrap();
     let sdl_video = sdl_context.video().unwrap();
@@ -117,7 +121,7 @@ fn main() {
 
     let mut vnc =
         match vnc::client::Builder::new()
-                 .copy_rect(true)
+                 .copy_rect(!qemu_hacks)
                  .set_cursor(true)
                  .resize(true)
                  .from_tcp_stream(stream, |methods| {
@@ -187,6 +191,7 @@ fn main() {
                        false).unwrap();
 
     let mut incremental = true;
+    let mut qemu_update = false;
     'running: loop {
         const FRAME_MS: u32 = 1000 / 60;
         let ticks = sdl_timer.ticks();
@@ -212,7 +217,9 @@ fn main() {
                     renderer.window_mut().unwrap().set_size(width as u32, height as u32);
                     screen = renderer.create_texture_streaming(
                         sdl_format, (width as u32, height as u32)).unwrap();
+
                     incremental = false;
+                    qemu_update = true;
                 },
                 Event::PutPixels(vnc_rect, ref pixels) => {
                     let sdl_rect = SdlRect::new_unwrap(
@@ -221,12 +228,10 @@ fn main() {
                     screen.update(Some(sdl_rect), pixels,
                         sdl_format.byte_size_of_pixels(vnc_rect.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_rect), Some(sdl_rect));
-                    match (incremental, vnc_rect) {
-                        (false, vnc::Rect { left: 0, top: 0, width: upd_width, height: upd_height })
-                                if upd_width == width && upd_height == height =>
-                            incremental = true,
-                        _ => ()
-                    }
+
+                    incremental |= vnc_rect == vnc::Rect { left: 0, top: 0,
+                                                           width: width, height: height };
+                    qemu_update  = true;
                 },
                 Event::CopyPixels { src: vnc_src, dst: vnc_dst } => {
                     let sdl_src = SdlRect::new_unwrap(
@@ -378,8 +383,19 @@ fn main() {
             if sdl_timer.ticks() - ticks > FRAME_MS { break }
         }
 
-        vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
-                           incremental).unwrap();
+        if qemu_hacks && qemu_update {
+            // QEMU ignores incremental update requests and sends non-incremental ones,
+            // but does not update framebuffer in them. However, it does update framebuffer
+            // (and send it to us) if we change the pixel format, including not actually
+            // changing it.
+            let format = vnc.format();
+            vnc.set_format(format).unwrap();
+            qemu_update = false;
+        } else {
+            vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+                               incremental).unwrap();
+
+        }
     }
 }
 

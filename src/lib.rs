@@ -6,7 +6,7 @@ mod protocol;
 pub mod client;
 pub mod proxy;
 
-pub use protocol::{Version, PixelFormat};
+pub use protocol::PixelFormat;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Rect {

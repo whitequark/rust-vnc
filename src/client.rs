@@ -261,7 +261,6 @@ impl Builder {
         Ok(Client {
             stream:  stream,
             events:  events,
-            version: version,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
             format:  server_init.pixel_format
@@ -272,14 +271,12 @@ impl Builder {
 pub struct Client {
     stream:  TcpStream,
     events:  Receiver<Event>,
-    version: protocol::Version,
     name:    String,
     size:    (u16, u16),
     format:  protocol::PixelFormat
 }
 
 impl Client {
-    pub fn version(&self) -> protocol::Version { self.version }
     pub fn name(&self) -> &str { &self.name }
     pub fn size(&self) -> (u16, u16) { self.size }
     pub fn format(&self) -> protocol::PixelFormat { self.format.clone() }

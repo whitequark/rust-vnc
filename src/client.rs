@@ -9,13 +9,16 @@ use protocol::{self, Message};
 pub enum AuthMethod {
     None,
     /* more to come */
-    Unused
+    #[doc(hidden)]
+    __Nonexhaustive,
 }
 
 #[derive(Debug)]
 pub enum AuthChoice {
     None,
     /* more to come */
+    #[doc(hidden)]
+    __Nonexhaustive,
 }
 
 #[derive(Debug)]
@@ -204,6 +207,7 @@ impl Builder {
             _ => {
                 let used_security_type = match auth_choice {
                     AuthChoice::None => protocol::SecurityType::None,
+                    AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
                 try!(protocol::SecurityType::write_to(&used_security_type, &mut stream));

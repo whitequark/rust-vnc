@@ -173,7 +173,7 @@ impl Message for ClientInit {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PixelFormat {
     pub bits_per_pixel: u8,
     pub depth:          u8,

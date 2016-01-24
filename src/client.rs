@@ -1,8 +1,9 @@
 use std::io::Read;
 use std::net::{TcpStream, Shutdown};
 use std::thread;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use ::{Rect, Error, Result};
+use ::{Rect, Colour, Error, Result};
 use protocol::{self, Message};
 
 #[derive(Debug)]
@@ -25,6 +26,7 @@ pub enum AuthChoice {
 pub enum Event {
     Disconnected(Option<Error>),
     Resize(u16, u16),
+    SetColourMap { first_colour: u16, colours: Vec<Colour> },
     PutPixels(Rect, Vec<u8>),
     CopyPixels { src: Rect, dst: Rect },
     SetCursor { size: (u16, u16), hotspot: (u16, u16), pixels: Vec<u8>, mask_bits: Vec<u8> },
@@ -42,7 +44,7 @@ macro_rules! send_or_return {
 }
 
 impl Event {
-    fn pump_one(stream: &mut TcpStream, format: &protocol::PixelFormat,
+    fn pump_one(stream: &mut TcpStream, format: &Arc<Mutex<protocol::PixelFormat>>,
                 tx_events: &mut Sender<Event>) -> Result<bool> {
         let packet =
             match protocol::S2C::read_from(stream) {
@@ -55,7 +57,13 @@ impl Event {
             };
         debug!("<- {:?}", packet);
 
+        let format = *format.lock().unwrap();
         match packet {
+            protocol::S2C::SetColourMapEntries { first_colour, colours } => {
+                send_or_return!(tx_events, Event::SetColourMap {
+                    first_colour: first_colour, colours: colours
+                })
+            },
             protocol::S2C::FramebufferUpdate { count } => {
                 for _ in 0..count {
                     let rectangle = try!(protocol::Rectangle::read_from(stream));
@@ -115,13 +123,12 @@ impl Event {
             protocol::S2C::Bell =>
                 send_or_return!(tx_events, Event::Bell),
             protocol::S2C::CutText(text) =>
-                send_or_return!(tx_events, Event::Clipboard(text)),
-            _ => return Err(Error::UnexpectedValue("server to client packet"))
+                send_or_return!(tx_events, Event::Clipboard(text))
         };
         Ok(true)
     }
 
-    fn pump(mut stream: TcpStream, format: protocol::PixelFormat) -> Receiver<Event> {
+    fn pump(mut stream: TcpStream, format: Arc<Mutex<protocol::PixelFormat>>) -> Receiver<Event> {
         let (mut tx_events, rx_events) = channel();
         thread::spawn(move || {
             loop {
@@ -246,8 +253,8 @@ impl Builder {
         let server_init = try!(protocol::ServerInit::read_from(&mut stream));
         debug!("<- {:?}", server_init);
 
-        let events = Event::pump(stream.try_clone().unwrap(),
-                                 server_init.pixel_format.clone());
+        let format = Arc::new(Mutex::new(server_init.pixel_format));
+        let events = Event::pump(stream.try_clone().unwrap(), format.clone());
 
         let mut encodings = vec![protocol::Encoding::Raw];
         if self.copy_rect  { encodings.push(protocol::Encoding::CopyRect) }
@@ -263,7 +270,7 @@ impl Builder {
             events:  events,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
-            format:  server_init.pixel_format
+            format:  format
         })
     }
 }
@@ -273,13 +280,13 @@ pub struct Client {
     events:  Receiver<Event>,
     name:    String,
     size:    (u16, u16),
-    format:  protocol::PixelFormat
+    format:  Arc<Mutex<protocol::PixelFormat>>
 }
 
 impl Client {
     pub fn name(&self) -> &str { &self.name }
     pub fn size(&self) -> (u16, u16) { self.size }
-    pub fn format(&self) -> protocol::PixelFormat { self.format.clone() }
+    pub fn format(&self) -> protocol::PixelFormat { *self.format.lock().unwrap() }
 
     pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {
@@ -325,13 +332,39 @@ impl Client {
     // Note that due to inherent weaknesses of the VNC protocol, this
     // function is prone to race conditions that break the connection framing.
     // The ZRLE encoding is self-delimiting and if both the client and server
-    // support it, there can be no race condition, but we currently don't.
+    // support and use it, there can be no race condition, but we currently don't.
     pub fn set_format(&mut self, format: protocol::PixelFormat) -> Result<()> {
-        let set_pixel_format = protocol::C2S::SetPixelFormat(self.format.clone());
+        // Request (and discard) one full update to try and ensure that there
+        // are no FramebufferUpdate's in the buffers somewhere.
+        // This is not fully robust though (and cannot possibly be).
+        let _ = self.poll_iter().count(); // drain it
+        let framebuffer_rect = Rect { left: 0, top: 0, width: self.size.0, height: self.size.1 };
+        try!(self.request_update(framebuffer_rect, false));
+        'outer: loop {
+            for event in self.poll_iter() {
+                match event {
+                    Event::PutPixels(rect, _) if rect == framebuffer_rect => break 'outer,
+                    _ => ()
+                }
+            }
+        }
+
+        // Since VNC is fully client-driven, by this point the event thread is stuck
+        // waiting for the next message and the server is not sending us anything,
+        // so it's safe to switch to the new pixel format.
+        let set_pixel_format = protocol::C2S::SetPixelFormat(format);
         debug!("-> {:?}", set_pixel_format);
         try!(protocol::C2S::write_to(&set_pixel_format, &mut self.stream));
+        *self.format.lock().unwrap() = format;
 
-        self.format = format;
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn poke_qemu(&mut self) -> Result<()> {
+        let set_pixel_format = protocol::C2S::SetPixelFormat(*self.format.lock().unwrap());
+        debug!("-> {:?}", set_pixel_format);
+        try!(protocol::C2S::write_to(&set_pixel_format, &mut self.stream));
         Ok(())
     }
 

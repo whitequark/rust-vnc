@@ -8,23 +8,74 @@ extern crate byteorder;
 
 use std::io::{Read, Write, Cursor};
 use clap::{Arg, App};
-use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum};
+use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum as SdlPixelFormat};
 use sdl2::rect::Rect as SdlRect;
-use sdl2::render::BlendMode;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 
-fn mask_cursor(in_format: PixelFormatEnum, in_pixels: Vec<u8>, mask_pixels: Vec<u8>) ->
-        (PixelFormatEnum, Vec<u8>) {
+const FORMAT_MAP: [(SdlPixelFormat, vnc::PixelFormat); 5] = [
+    (SdlPixelFormat::RGB888, vnc::PixelFormat {
+        bits_per_pixel: 32, depth: 24, big_endian: false, true_colour: true,
+        red_max: 255,  green_max: 255, blue_max: 255,
+        red_shift: 16, green_shift: 8, blue_shift: 0
+    }),
+    (SdlPixelFormat::BGR888, vnc::PixelFormat {
+        bits_per_pixel: 32, depth: 24, big_endian: false, true_colour: true,
+        red_max: 255,  green_max: 255, blue_max: 255,
+        red_shift: 0, green_shift: 8, blue_shift: 16
+    }),
+    // these break x11vnc
+    // (SdlPixelFormat::RGB24, vnc::PixelFormat {
+    //     bits_per_pixel: 24, depth: 24, big_endian: false, true_colour: true,
+    //     red_max: 255,  green_max: 255, blue_max: 255,
+    //     red_shift: 16, green_shift: 8, blue_shift: 0
+    // }),
+    // (SdlPixelFormat::BGR24, vnc::PixelFormat {
+    //     bits_per_pixel: 24, depth: 24, big_endian: true, true_colour: true,
+    //     red_max: 255,  green_max: 255, blue_max: 255,
+    //     red_shift: 0, green_shift: 8, blue_shift: 16
+    // }),
+    (SdlPixelFormat::RGB565, vnc::PixelFormat {
+        bits_per_pixel: 16, depth: 16, big_endian: false, true_colour: true,
+        red_max: 32,  green_max: 64, blue_max: 32,
+        red_shift: 11, green_shift: 5, blue_shift: 0
+    }),
+    (SdlPixelFormat::BGR565, vnc::PixelFormat {
+        bits_per_pixel: 16, depth: 16, big_endian: false, true_colour: true,
+        red_max: 32,  green_max: 64, blue_max: 32,
+        red_shift: 0, green_shift: 5, blue_shift: 11
+    }),
+    (SdlPixelFormat::RGB332, vnc::PixelFormat {
+        bits_per_pixel: 8, depth: 8, big_endian: false, true_colour: true,
+        red_max: 8,  green_max: 8, blue_max: 4,
+        red_shift: 5, green_shift: 2, blue_shift: 0
+    }),
+];
+
+fn pixel_format_vnc_to_sdl(vnc_format: vnc::PixelFormat) -> Option<SdlPixelFormat> {
+    for format in &FORMAT_MAP {
+        if format.1 == vnc_format { return Some(format.0) }
+    }
+    return None
+}
+
+fn pixel_format_sdl_to_vnc(sdl_format: SdlPixelFormat) -> Option<vnc::PixelFormat> {
+    for format in &FORMAT_MAP {
+        if format.0 == sdl_format { return Some(format.1) }
+    }
+    return None
+}
+
+fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels: Vec<u8>) ->
+        (SdlPixelFormat, Vec<u8>) {
     use sdl2::pixels::PixelFormatEnum::*;
 
+    let in_format  = pixel_format_vnc_to_sdl(vnc_in_format).unwrap();
     let out_format =
         match in_format {
-            ARGB4444 | RGBA4444 | ABGR4444 | BGRA4444 |
-            ARGB1555 | RGBA5551 | ABGR1555 | BGRA5551 |
-            ARGB8888 | RGBA8888 | ABGR8888 | BGRA8888 => in_format,
+            RGB332 => ARGB4444, /* meh, close enough */
             RGB444 => ARGB4444,
-            RGB555 => ARGB1555,
-            BGR555 => ABGR1555,
+            RGB555 | RGB565 => ARGB1555,
+            BGR555 | BGR565 => ABGR1555,
             RGB24 | RGB888 | RGBX8888 => ARGB8888,
             BGR24 | BGR888 | BGRX8888 => ABGR8888,
             _ => panic!("cannot add alpha to {:?}", in_format)
@@ -54,14 +105,14 @@ fn mask_cursor(in_format: PixelFormatEnum, in_pixels: Vec<u8>, mask_pixels: Vec<
             byteorder::Result<()> {
         let packed = match color {
             Color::RGBA(r, g, b, a) => {
-                ((r as u64) << masks.rmask.trailing_zeros()) |
-                ((g as u64) << masks.gmask.trailing_zeros()) |
-                ((b as u64) << masks.bmask.trailing_zeros()) |
-                ((a as u64) << masks.amask.trailing_zeros())
+                (((r as u32) << masks.rmask.trailing_zeros()) & masks.rmask) |
+                (((g as u32) << masks.gmask.trailing_zeros()) & masks.gmask) |
+                (((b as u32) << masks.bmask.trailing_zeros()) & masks.bmask) |
+                (((a as u32) << masks.amask.trailing_zeros()) & masks.amask)
             },
             _ => unreachable!()
         };
-        writer.write_uint::<NativeEndian>(packed, size).unwrap();
+        writer.write_uint::<NativeEndian>(packed as u64, size).unwrap();
         Ok(())
     }
 
@@ -144,29 +195,21 @@ fn main() {
     let (mut width, mut height) = vnc.size();
     info!("connected to \"{}\", {}x{} framebuffer", vnc.name(), width, height);
 
-    let vnc_format = vnc.format();
+    let mut vnc_format = vnc.format();
     info!("received {:?}", vnc_format);
 
-    if !vnc_format.true_colour {
-        error!("only true color pixel formats are supported");
-        std::process::exit(1)
-    }
-
-    match vnc_format.bits_per_pixel {
-        16 | 24 | 32 => (),
-        n => {
-            error!("{}-bit color is not supported", n);
-            std::process::exit(1)
-        }
-    }
-
-    let sdl_format = PixelFormatEnum::from_masks(PixelMasks {
-        bpp:   vnc_format.bits_per_pixel,
-        rmask: (vnc_format.red_max as u32) << vnc_format.red_shift,
-        gmask: (vnc_format.green_max as u32) << vnc_format.green_shift,
-        bmask: (vnc_format.blue_max as u32) << vnc_format.blue_shift,
-        amask: 0
-    });
+    let sdl_format =
+        match pixel_format_vnc_to_sdl(vnc_format) {
+            Some(format) => format,
+            None => {
+                let sdl_format = SdlPixelFormat::RGB888;
+                vnc_format = pixel_format_sdl_to_vnc(sdl_format).unwrap();
+                warn!("server's natural framebuffer format {:?} is not supported, \
+                       using {:?} instead", vnc_format, sdl_format);
+                vnc.set_format(vnc_format).unwrap();
+                sdl_format
+            }
+        };
     info!("rendering to a {:?} texture", sdl_format);
 
     let window = sdl_video.window(&format!("{} - {}:{} - RVNC", vnc.name(), host, port),
@@ -270,12 +313,12 @@ fn main() {
                             }
                         }
                         let (sdl_cursor_format, cursor_pixels) =
-                            mask_cursor(sdl_format, pixels, mask_pixels);
+                            mask_cursor(vnc_format, pixels, mask_pixels);
                         let mut new_cursor = renderer.create_texture_streaming(
                             sdl_cursor_format, (width as u32, height as u32)).unwrap();
                         new_cursor.update(None, &cursor_pixels,
                             sdl_cursor_format.byte_size_of_pixels(width as usize)).unwrap();
-                        new_cursor.set_blend_mode(BlendMode::Blend);
+                        new_cursor.set_blend_mode(sdl2::render::BlendMode::Blend);
                         cursor = Some(new_cursor);
                     } else {
                         cursor = None
@@ -389,8 +432,7 @@ fn main() {
             // but does not update framebuffer in them. However, it does update framebuffer
             // (and send it to us) if we change the pixel format, including not actually
             // changing it.
-            let format = vnc.format();
-            vnc.set_format(format).unwrap();
+            vnc.poke_qemu().unwrap();
             qemu_update = false;
         } else {
             vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},

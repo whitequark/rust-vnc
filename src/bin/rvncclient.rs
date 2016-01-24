@@ -294,15 +294,16 @@ fn main() {
                     cursor.query().width as u32, cursor.query().height as u32);
                 let screen_rect = SdlRect::new_unwrap(
                     0, 0, width as u32, height as u32);
-                let clipped_cursor_rect = (raw_cursor_rect & screen_rect).unwrap();
-                let source_rect = SdlRect::new_unwrap(
-                    clipped_cursor_rect.x() - raw_cursor_rect.x(),
-                    clipped_cursor_rect.y() - raw_cursor_rect.y(),
-                    clipped_cursor_rect.width(),
-                    clipped_cursor_rect.height());
-
-                renderer.copy(&cursor, Some(source_rect), Some(clipped_cursor_rect));
-                cursor_rect = Some(clipped_cursor_rect);
+                let clipped_cursor_rect = raw_cursor_rect & screen_rect;
+                if let Some(clipped_cursor_rect) = clipped_cursor_rect {
+                    let source_rect = SdlRect::new_unwrap(
+                        clipped_cursor_rect.x() - raw_cursor_rect.x(),
+                        clipped_cursor_rect.y() - raw_cursor_rect.y(),
+                        clipped_cursor_rect.width(),
+                        clipped_cursor_rect.height());
+                    renderer.copy(&cursor, Some(source_rect), Some(clipped_cursor_rect));
+                }
+                cursor_rect = clipped_cursor_rect;
             },
             None => {
                 sdl_context.mouse().show_cursor(true);

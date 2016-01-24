@@ -171,11 +171,7 @@ fn main() {
         };
 
     let mut vnc =
-        match vnc::client::Builder::new()
-                 .copy_rect(!qemu_hacks)
-                 .set_cursor(true)
-                 .resize(true)
-                 .from_tcp_stream(stream, |methods| {
+        match vnc::Client::from_tcp_stream(stream, false, |methods| {
             for method in methods {
                 match method {
                     &vnc::client::AuthMethod::None =>
@@ -212,6 +208,15 @@ fn main() {
         };
     info!("rendering to a {:?} texture", sdl_format);
 
+    if qemu_hacks {
+        vnc.set_encodings(&[vnc::Encoding::Zrle, vnc::Encoding::DesktopSize]).unwrap()
+    } else {
+        vnc.set_encodings(&[
+            vnc::Encoding::Zrle, vnc::Encoding::CopyRect, vnc::Encoding::Raw,
+            vnc::Encoding::Cursor, vnc::Encoding::DesktopSize
+        ]).unwrap()
+    }
+
     let window = sdl_video.window(&format!("{} - {}:{} - RVNC", vnc.name(), host, port),
                                   width as u32, height as u32).build().unwrap();
     sdl_video.text_input().start();
@@ -239,11 +244,7 @@ fn main() {
         const FRAME_MS: u32 = 1000 / 60;
         let ticks = sdl_timer.ticks();
 
-        match cursor_rect {
-            Some(cursor_rect) =>
-                renderer.copy(&screen, Some(cursor_rect), Some(cursor_rect)),
-            None => ()
-        }
+        renderer.present();
 
         for event in vnc.poll_iter() {
             use vnc::client::Event;
@@ -326,6 +327,14 @@ fn main() {
                 }
                 _ => () /* ignore unsupported events */
             }
+
+            if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
+        }
+
+        match cursor_rect {
+            Some(cursor_rect) =>
+                renderer.copy(&screen, Some(cursor_rect), Some(cursor_rect)),
+            None => ()
         }
 
         match cursor {
@@ -354,8 +363,6 @@ fn main() {
                 cursor_rect = None;
             }
         }
-
-        renderer.present();
 
         for event in sdl_events.wait_timeout_iter(sdl_timer.ticks() - ticks + FRAME_MS) {
             use sdl2::event::{Event, WindowEventId};
@@ -429,7 +436,7 @@ fn main() {
                 _ => ()
             }
 
-            if sdl_timer.ticks() - ticks > FRAME_MS { break }
+            if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
         }
 
         if qemu_hacks && qemu_update {

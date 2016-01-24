@@ -34,7 +34,7 @@ To use the VNC library in your project, add the following to `Cargo.toml`:
 
 ```toml
 [dependencies]
-vnc = "^0.1"
+vnc = "^0.2"
 ```
 
 Why?
@@ -66,9 +66,8 @@ Why not?
 I didn't really intend to write this library at all, and as such it has
 some drawbacks:
 
-  * No server state machine or compression.
+  * No server state machine.
   * No encryption or authentication.
-  * No pixel encoding support beyond Raw and CopyRect.
   * No inline documentation (but the [signatures][doc] and the [client][]
     could be helpful already).
 

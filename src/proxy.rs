@@ -214,7 +214,7 @@ impl Proxy {
                                     try!(buffer_stream.write_all(&mask_bits));
                                 },
                                 protocol::Encoding::DesktopSize => (),
-                                _ => return Err(Error::UnexpectedValue("encoding"))
+                                _ => return Err(Error::Unexpected("encoding"))
                             }
                         }
                     },

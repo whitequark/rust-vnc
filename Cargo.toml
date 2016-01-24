@@ -11,10 +11,11 @@ description = "An implementation of VNC protocol, client state machine, a client
 
 [dependencies]
 # library deps
-log = "^0.3"
-byteorder = "^0.4"
+log = "0.3"
+byteorder = "0.4"
+flate2 = "0.2.13"
 # binary deps; needs https://github.com/rust-lang/cargo/issues/1982
-env_logger = "^0.3"
-clap = "^1.5"
-sdl2 = "^0.13"
-x11 = "^2.3"
+env_logger = "0.3"
+clap = "1.5"
+sdl2 = "0.13"
+x11 = "2.3"

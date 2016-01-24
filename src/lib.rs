@@ -1,12 +1,17 @@
 #[macro_use] extern crate log;
 // TODO: https://github.com/BurntSushi/byteorder/pull/40
 extern crate byteorder;
+extern crate flate2;
 
 mod protocol;
+mod zrle;
+
 pub mod client;
 pub mod proxy;
 
-pub use protocol::{PixelFormat, Colour};
+pub use protocol::{PixelFormat, Colour, Encoding};
+pub use client::Client;
+pub use proxy::Proxy;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Rect {
@@ -19,7 +24,7 @@ pub struct Rect {
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    UnexpectedValue(&'static str),
+    Unexpected(&'static str),
     Server(String),
     AuthenticationUnavailable,
     AuthenticationFailure(String),
@@ -30,8 +35,8 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
             &Error::Io(ref inner) => inner.fmt(f),
-            &Error::UnexpectedValue(ref descr) =>
-                write!(f, "unexpected value for {}", descr),
+            &Error::Unexpected(ref descr) =>
+                write!(f, "unexpected {}", descr),
             &Error::Server(ref descr) =>
                 write!(f, "server error: {}", descr),
             &Error::AuthenticationFailure(ref descr) =>
@@ -45,7 +50,7 @@ impl std::error::Error for Error {
     fn description(&self) -> &str {
         match self {
             &Error::Io(ref inner) => inner.description(),
-            &Error::UnexpectedValue(_) => "unexpected value",
+            &Error::Unexpected(_) => "unexpected value",
             &Error::Server(_) => "server error",
             &Error::AuthenticationUnavailable => "authentication unavailable",
             &Error::AuthenticationFailure(_) => "authentication failure",

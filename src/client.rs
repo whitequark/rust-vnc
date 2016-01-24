@@ -3,8 +3,9 @@ use std::net::{TcpStream, Shutdown};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use ::{Rect, Colour, Error, Result};
-use protocol::{self, Message};
+use byteorder::{BigEndian, ReadBytesExt};
+use ::{zrle, protocol, Rect, Colour, Error, Result};
+use protocol::Message;
 
 #[derive(Debug)]
 pub enum AuthMethod {
@@ -45,7 +46,7 @@ macro_rules! send_or_return {
 
 impl Event {
     fn pump_one(stream: &mut TcpStream, format: &Arc<Mutex<protocol::PixelFormat>>,
-                tx_events: &mut Sender<Event>) -> Result<bool> {
+                zrle_decoder: &mut zrle::Decoder, tx_events: &mut Sender<Event>) -> Result<bool> {
         let packet =
             match protocol::S2C::read_from(stream) {
                 Ok(packet) => packet,
@@ -68,19 +69,21 @@ impl Event {
                 for _ in 0..count {
                     let rectangle = try!(protocol::Rectangle::read_from(stream));
                     debug!("<- {:?}", rectangle);
-                    let event = match rectangle.encoding {
+
+                    let dst = Rect {
+                        left:   rectangle.x_position,
+                        top:    rectangle.y_position,
+                        width:  rectangle.width,
+                        height: rectangle.height
+                    };
+                    match rectangle.encoding {
                         protocol::Encoding::Raw => {
                             let mut pixels = vec![0; (rectangle.width as usize) *
                                                      (rectangle.height as usize) *
                                                      (format.bits_per_pixel as usize / 8)];
                             try!(stream.read_exact(&mut pixels));
                             debug!("<- ...pixels");
-                            Event::PutPixels(Rect {
-                                left:   rectangle.x_position,
-                                top:    rectangle.y_position,
-                                width:  rectangle.width,
-                                height: rectangle.height
-                            }, pixels)
+                            send_or_return!(tx_events, Event::PutPixels(dst, pixels))
                         },
                         protocol::Encoding::CopyRect => {
                             let copy_rect = try!(protocol::CopyRect::read_from(stream));
@@ -90,14 +93,20 @@ impl Event {
                                 width:  rectangle.width,
                                 height: rectangle.height
                             };
-                            let dst = Rect {
-                                left:   rectangle.x_position,
-                                top:    rectangle.y_position,
-                                width:  rectangle.width,
-                                height: rectangle.height
-                            };
-                            Event::CopyPixels { src: src, dst: dst }
+                            send_or_return!(tx_events, Event::CopyPixels { src: src, dst: dst })
                         },
+                        protocol::Encoding::Zrle => {
+                            let length = try!(stream.read_u32::<BigEndian>());
+                            let mut data = vec![0; length as usize];
+                            try!(stream.read_exact(&mut data));
+                            debug!("<- ...compressed pixels");
+                            let result = try!(zrle_decoder.decode(format, dst, &data,
+                                |tile, pixels| {
+                                    send_or_return!(tx_events, Event::PutPixels(tile, pixels));
+                                    Ok(true)
+                                }));
+                            if !result { return Ok(false) }
+                        }
                         protocol::Encoding::Cursor => {
                             let mut pixels    = vec![0; (rectangle.width as usize) *
                                                         (rectangle.height as usize) *
@@ -106,18 +115,19 @@ impl Event {
                             let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
                                                         (rectangle.height as usize)];
                             try!(stream.read_exact(&mut mask_bits));
-                            Event::SetCursor {
+                            send_or_return!(tx_events, Event::SetCursor {
                                 size:      (rectangle.width, rectangle.height),
                                 hotspot:   (rectangle.x_position, rectangle.y_position),
                                 pixels:    pixels,
                                 mask_bits: mask_bits
-                            }
+                            })
                         },
-                        protocol::Encoding::DesktopSize =>
-                            Event::Resize(rectangle.width, rectangle.height),
-                        _ => return Err(Error::UnexpectedValue("encoding"))
+                        protocol::Encoding::DesktopSize => {
+                            send_or_return!(tx_events,
+                                Event::Resize(rectangle.width, rectangle.height))
+                        }
+                        _ => return Err(Error::Unexpected("encoding"))
                     };
-                    send_or_return!(tx_events, event)
                 }
             },
             protocol::S2C::Bell =>
@@ -131,8 +141,9 @@ impl Event {
     fn pump(mut stream: TcpStream, format: Arc<Mutex<protocol::PixelFormat>>) -> Receiver<Event> {
         let (mut tx_events, rx_events) = channel();
         thread::spawn(move || {
+            let mut zrle_decoder = zrle::Decoder::new();
             loop {
-                match Event::pump_one(&mut stream, &format, &mut tx_events) {
+                match Event::pump_one(&mut stream, &format, &mut zrle_decoder, &mut tx_events) {
                     Ok(true) => (),
                     Ok(false) => break,
                     Err(error) => {
@@ -146,29 +157,17 @@ impl Event {
     }
 }
 
-pub struct Builder {
-    shared:       bool,
-    copy_rect:    bool,
-    set_cursor:   bool,
-    resize:       bool,
+pub struct Client {
+    stream:  TcpStream,
+    events:  Receiver<Event>,
+    name:    String,
+    size:    (u16, u16),
+    format:  Arc<Mutex<protocol::PixelFormat>>
 }
 
-impl Builder {
-    pub fn new() -> Builder {
-        Builder {
-            shared:       false,
-            copy_rect:    false,
-            set_cursor:   false,
-            resize:       false,
-        }
-    }
-
-    pub fn shared    (mut self, value: bool) -> Builder { self.shared = value; self }
-    pub fn copy_rect (mut self, value: bool) -> Builder { self.copy_rect = value; self }
-    pub fn set_cursor(mut self, value: bool) -> Builder { self.set_cursor = value; self }
-    pub fn resize    (mut self, value: bool) -> Builder { self.resize = value; self }
-
-    pub fn from_tcp_stream<Auth>(self, mut stream: TcpStream, auth: Auth) -> Result<Client>
+impl Client {
+    pub fn from_tcp_stream<Auth>(mut stream: TcpStream, shared: bool,
+                                 auth: Auth) -> Result<Client>
             where Auth: FnOnce(&[AuthMethod]) -> Option<AuthChoice> {
         let version = try!(protocol::Version::read_from(&mut stream));
         debug!("<- Version::{:?}", version);
@@ -246,7 +245,7 @@ impl Builder {
             }
         }
 
-        let client_init = protocol::ClientInit { shared: self.shared };
+        let client_init = protocol::ClientInit { shared: shared };
         debug!("-> {:?}", client_init);
         try!(protocol::ClientInit::write_to(&client_init, &mut stream));
 
@@ -256,15 +255,6 @@ impl Builder {
         let format = Arc::new(Mutex::new(server_init.pixel_format));
         let events = Event::pump(stream.try_clone().unwrap(), format.clone());
 
-        let mut encodings = vec![protocol::Encoding::Raw];
-        if self.copy_rect  { encodings.push(protocol::Encoding::CopyRect) }
-        if self.set_cursor { encodings.push(protocol::Encoding::Cursor) }
-        if self.resize     { encodings.push(protocol::Encoding::DesktopSize) }
-
-        let set_encodings = protocol::C2S::SetEncodings(encodings);
-        debug!("-> {:?}", set_encodings);
-        try!(protocol::C2S::write_to(&set_encodings, &mut stream));
-
         Ok(Client {
             stream:  stream,
             events:  events,
@@ -273,20 +263,17 @@ impl Builder {
             format:  format
         })
     }
-}
 
-pub struct Client {
-    stream:  TcpStream,
-    events:  Receiver<Event>,
-    name:    String,
-    size:    (u16, u16),
-    format:  Arc<Mutex<protocol::PixelFormat>>
-}
-
-impl Client {
     pub fn name(&self) -> &str { &self.name }
     pub fn size(&self) -> (u16, u16) { self.size }
     pub fn format(&self) -> protocol::PixelFormat { *self.format.lock().unwrap() }
+
+    pub fn set_encodings(&mut self, encodings: &[protocol::Encoding]) -> Result<()> {
+        let set_encodings = protocol::C2S::SetEncodings(Vec::from(encodings));
+        debug!("-> {:?}", set_encodings);
+        try!(protocol::C2S::write_to(&set_encodings, &mut self.stream));
+        Ok(())
+    }
 
     pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {

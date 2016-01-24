@@ -1,8 +1,6 @@
 use std;
-use byteorder;
-
 use std::io::{Read, Write};
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{self, BigEndian, ReadBytesExt, WriteBytesExt};
 use ::{Error, Result};
 
 pub trait Message {
@@ -59,7 +57,7 @@ impl Message for Version {
             b"RFB 003.003\n" => Ok(Version::Rfb33),
             b"RFB 003.007\n" => Ok(Version::Rfb37),
             b"RFB 003.008\n" => Ok(Version::Rfb38),
-            _ => Err(Error::UnexpectedValue("protocol version"))
+            _ => Err(Error::Unexpected("protocol version"))
         }
     }
 
@@ -141,7 +139,7 @@ impl Message for SecurityResult {
         match result {
             0 => Ok(SecurityResult::Succeeded),
             1 => Ok(SecurityResult::Failed),
-            _ => Err(Error::UnexpectedValue("security result"))
+            _ => Err(Error::Unexpected("security result"))
         }
     }
 
@@ -386,7 +384,7 @@ impl Message for C2S {
                 try!(reader.read_exact(&mut [0u8; 3]));
                 Ok(C2S::CutText(try!(String::read_from(reader))))
             },
-            _ => Err(Error::UnexpectedValue("client to server message type"))
+            _ => Err(Error::Unexpected("client to server message type"))
         }
     }
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -533,7 +531,7 @@ impl Message for S2C {
                 try!(reader.read_exact(&mut [0u8; 3]));
                 Ok(S2C::CutText(try!(String::read_from(reader))))
             },
-            _ => Err(Error::UnexpectedValue("server to client message type"))
+            _ => Err(Error::Unexpected("server to client message type"))
         }
     }
 

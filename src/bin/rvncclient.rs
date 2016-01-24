@@ -201,7 +201,11 @@ fn main() {
             use vnc::client::Event;
 
             match event {
-                Event::Disconnected => break 'running,
+                Event::Disconnected(None) => break 'running,
+                Event::Disconnected(Some(error)) => {
+                    error!("server disconnected: {:?}", error);
+                    break 'running
+                }
                 Event::Resize(new_width, new_height) => {
                     width  = new_width;
                     height = new_height;

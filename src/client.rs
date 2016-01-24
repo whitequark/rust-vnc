@@ -20,7 +20,7 @@ pub enum AuthChoice {
 
 #[derive(Debug)]
 pub enum Event {
-    Disconnected,
+    Disconnected(Option<Error>),
     Resize(u16, u16),
     PutPixels(Rect, Vec<u8>),
     CopyPixels { src: Rect, dst: Rect },
@@ -33,16 +33,25 @@ macro_rules! send_or_return {
     ($chan:expr, $data:expr) => ({
         match $chan.send($data) {
             Ok(()) => (),
-            Err(_) => return Err(Error::UnexpectedEOF)
+            Err(_) => return Ok(false)
         }
     })
 }
 
 impl Event {
     fn pump_one(stream: &mut TcpStream, format: &protocol::PixelFormat,
-                tx_events: &mut Sender<Event>) -> Result<()> {
-        let packet = try!(protocol::S2C::read_from(stream));
+                tx_events: &mut Sender<Event>) -> Result<bool> {
+        let packet =
+            match protocol::S2C::read_from(stream) {
+                Ok(packet) => packet,
+                Err(Error::Disconnected) => {
+                    send_or_return!(tx_events, Event::Disconnected(None));
+                    return Ok(false)
+                },
+                Err(error) => return Err(error)
+            };
         debug!("<- {:?}", packet);
+
         match packet {
             protocol::S2C::FramebufferUpdate { count } => {
                 for _ in 0..count {
@@ -106,7 +115,7 @@ impl Event {
                 send_or_return!(tx_events, Event::Clipboard(text)),
             _ => return Err(Error::UnexpectedValue("server to client packet"))
         };
-        Ok(())
+        Ok(true)
     }
 
     fn pump(mut stream: TcpStream, format: protocol::PixelFormat) -> Receiver<Event> {
@@ -114,16 +123,12 @@ impl Event {
         thread::spawn(move || {
             loop {
                 match Event::pump_one(&mut stream, &format, &mut tx_events) {
-                    Ok(()) => (),
-                    Err(Error::UnexpectedEOF) => {
-                        // This happens both when the network side (VNC server)
-                        // disconnects and when the channel receiver (client code)
-                        // disconnects. In the former case poll_event translates
-                        // this to Error::Disconnected and in the latter one there
-                        // is nothing to observe the error anyway.
+                    Ok(true) => (),
+                    Ok(false) => break,
+                    Err(error) => {
+                        let _ = tx_events.send(Event::Disconnected(Some(error)));
                         break
-                    },
-                    Err(error) => panic!("cannot pump VNC client events: {}", error)
+                    }
                 }
             }
         });
@@ -318,8 +323,8 @@ impl Client {
 
     pub fn poll_event(&mut self) -> Option<Event> {
         match self.events.try_recv() {
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Event::Disconnected),
+            Err(TryRecvError::Empty) |
+            Err(TryRecvError::Disconnected) => None,
             Ok(Event::Resize(width, height)) => {
                 self.size = (width, height);
                 Some(Event::Resize(width, height))

@@ -19,27 +19,23 @@ pub struct Rect {
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    FromUtf8(std::string::FromUtf8Error),
-
-    UnexpectedEOF,
     UnexpectedValue(&'static str),
-    Disconnected,
+    Server(String),
     AuthenticationUnavailable,
     AuthenticationFailure(String),
-    Server(String)
+    Disconnected
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
             &Error::Io(ref inner) => inner.fmt(f),
-            &Error::FromUtf8(ref inner) => inner.fmt(f),
             &Error::UnexpectedValue(ref descr) =>
                 write!(f, "unexpected value for {}", descr),
-            &Error::AuthenticationFailure(ref descr) =>
-                write!(f, "authentication failure: {}", descr),
             &Error::Server(ref descr) =>
                 write!(f, "server error: {}", descr),
+            &Error::AuthenticationFailure(ref descr) =>
+                write!(f, "authentication failure: {}", descr),
             _ => f.write_str(std::error::Error::description(self))
         }
     }
@@ -49,20 +45,17 @@ impl std::error::Error for Error {
     fn description(&self) -> &str {
         match self {
             &Error::Io(ref inner) => inner.description(),
-            &Error::FromUtf8(ref inner) => inner.description(),
-            &Error::UnexpectedEOF => "unexpected EOF",
             &Error::UnexpectedValue(_) => "unexpected value",
-            &Error::Disconnected => "graceful disconnect",
+            &Error::Server(_) => "server error",
             &Error::AuthenticationUnavailable => "authentication unavailable",
             &Error::AuthenticationFailure(_) => "authentication failure",
-            &Error::Server(_) => "server error",
+            &Error::Disconnected => "peer disconnected",
         }
     }
 
     fn cause(&self) -> Option<&std::error::Error> {
         match self {
             &Error::Io(ref inner) => Some(inner),
-            &Error::FromUtf8(ref inner) => Some(inner),
             _ => None
         }
     }
@@ -72,14 +65,11 @@ impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Error { Error::Io(error) }
 }
 
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(error: std::string::FromUtf8Error) -> Error { Error::FromUtf8(error) }
-}
-
 impl From<byteorder::Error> for Error {
     fn from(error: byteorder::Error) -> Error {
         match error {
-            byteorder::Error::UnexpectedEOF => Error::UnexpectedEOF,
+            byteorder::Error::UnexpectedEOF =>
+                Error::Io(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, error)),
             byteorder::Error::Io(inner) => Error::Io(inner)
         }
     }

@@ -362,7 +362,10 @@ fn main() {
 
             match event {
                 Event::Quit { .. } => break 'running,
-                Event::Window { win_event_id: WindowEventId::Exposed, .. } => {
+                Event::Window { win_event_id: WindowEventId::SizeChanged, .. } => {
+                    let screen_rect = SdlRect::new_unwrap(
+                        0, 0, width as u32, height as u32);
+                    renderer.copy(&screen, None, Some(screen_rect));
                     renderer.present()
                 },
                 Event::KeyDown { keycode: Some(keycode), .. } |

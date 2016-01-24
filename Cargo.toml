@@ -1,13 +1,13 @@
 [package]
 name = "vnc"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["whitequark <whitequark@whitequark.org>"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/whitequark/rust-vnc"
 homepage = "https://github.com/whitequark/rust-vnc"
 documentation = "https://whitequark.github.io/rust-vnc/vnc"
-description = "An implementation of VNC protocol, client state machine and a client"
+description = "An implementation of VNC protocol, client state machine, a client and a proxy"
 
 [dependencies]
 # library deps

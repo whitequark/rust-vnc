@@ -116,14 +116,15 @@ fn main() {
         };
 
     let mut vnc =
-        match vnc::ClientBuilder::new()
+        match vnc::client::Builder::new()
                  .copy_rect(true)
                  .set_cursor(true)
                  .resize(true)
                  .from_tcp_stream(stream, |methods| {
             for method in methods {
                 match method {
-                    &vnc::AuthMethod::None => return Some(vnc::AuthChoice::None),
+                    &vnc::client::AuthMethod::None =>
+                        return Some(vnc::client::AuthChoice::None),
                     _ => ()
                 }
             }
@@ -197,11 +198,11 @@ fn main() {
         }
 
         for event in vnc.poll_iter() {
-            use vnc::ClientEvent;
+            use vnc::client::Event;
 
             match event {
-                ClientEvent::Disconnected => break 'running,
-                ClientEvent::Resize(new_width, new_height) => {
+                Event::Disconnected => break 'running,
+                Event::Resize(new_width, new_height) => {
                     width  = new_width;
                     height = new_height;
                     renderer.window_mut().unwrap().set_size(width as u32, height as u32);
@@ -209,7 +210,7 @@ fn main() {
                         sdl_format, (width as u32, height as u32)).unwrap();
                     incremental = false;
                 },
-                ClientEvent::PutPixels(vnc_rect, ref pixels) => {
+                Event::PutPixels(vnc_rect, ref pixels) => {
                     let sdl_rect = SdlRect::new_unwrap(
                         vnc_rect.left as i32, vnc_rect.top as i32,
                         vnc_rect.width as u32, vnc_rect.height as u32);
@@ -223,7 +224,7 @@ fn main() {
                         _ => ()
                     }
                 },
-                ClientEvent::CopyPixels { src: vnc_src, dst: vnc_dst } => {
+                Event::CopyPixels { src: vnc_src, dst: vnc_dst } => {
                     let sdl_src = SdlRect::new_unwrap(
                         vnc_src.left as i32, vnc_src.top as i32,
                         vnc_src.width as u32, vnc_src.height as u32);
@@ -235,12 +236,12 @@ fn main() {
                         sdl_format.byte_size_of_pixels(vnc_dst.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_dst), Some(sdl_dst));
                 },
-                ClientEvent::Clipboard(ref text) => {
+                Event::Clipboard(ref text) => {
                     let _ = sdl_video.clipboard().set_clipboard_text(text);
                     // this returns a Result, but unwrapping it fails with "Invalid renderer",
                     // even though the call to set_clipboard_text actually succeeds.
                 },
-                ClientEvent::SetCursor {
+                Event::SetCursor {
                     size:    (width, height),
                     hotspot: (new_hotspot_x, new_hotspot_y),
                     pixels,

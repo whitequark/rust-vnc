@@ -261,9 +261,7 @@ fn main() {
                     renderer.window_mut().unwrap().set_size(width as u32, height as u32);
                     screen = renderer.create_texture_streaming(
                         sdl_format, (width as u32, height as u32)).unwrap();
-
                     incremental = false;
-                    qemu_update = true;
                 },
                 Event::PutPixels(vnc_rect, ref pixels) => {
                     let sdl_rect = SdlRect::new_unwrap(
@@ -272,10 +270,8 @@ fn main() {
                     screen.update(Some(sdl_rect), pixels,
                         sdl_format.byte_size_of_pixels(vnc_rect.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_rect), Some(sdl_rect));
-
                     incremental |= vnc_rect == vnc::Rect { left: 0, top: 0,
                                                            width: width, height: height };
-                    qemu_update  = true;
                 },
                 Event::CopyPixels { src: vnc_src, dst: vnc_dst } => {
                     let sdl_src = SdlRect::new_unwrap(
@@ -288,6 +284,9 @@ fn main() {
                     screen.update(Some(sdl_dst), &pixels,
                         sdl_format.byte_size_of_pixels(vnc_dst.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_dst), Some(sdl_dst));
+                },
+                Event::EndOfFrame => {
+                    qemu_update = true;
                 },
                 Event::Clipboard(ref text) => {
                     let _ = sdl_video.clipboard().set_clipboard_text(text);

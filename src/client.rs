@@ -30,6 +30,7 @@ pub enum Event {
     SetColourMap { first_colour: u16, colours: Vec<Colour> },
     PutPixels(Rect, Vec<u8>),
     CopyPixels { src: Rect, dst: Rect },
+    EndOfFrame,
     SetCursor { size: (u16, u16), hotspot: (u16, u16), pixels: Vec<u8>, mask_bits: Vec<u8> },
     Clipboard(String),
     Bell,
@@ -129,6 +130,8 @@ impl Event {
                         _ => return Err(Error::Unexpected("encoding"))
                     };
                 }
+
+                send_or_return!(tx_events, Event::EndOfFrame);
             },
             protocol::S2C::Bell =>
                 send_or_return!(tx_events, Event::Bell),

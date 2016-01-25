@@ -239,7 +239,9 @@ fn main() {
                        false).unwrap();
 
     let mut incremental = true;
-    let mut qemu_update = false;
+    let mut qemu_network_rtt = 1000;
+    let mut qemu_prev_update = sdl_timer.ticks();
+    let mut qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
     'running: loop {
         const FRAME_MS: u32 = 1000 / 60;
         let ticks = sdl_timer.ticks();
@@ -286,7 +288,12 @@ fn main() {
                     renderer.copy(&screen, Some(sdl_dst), Some(sdl_dst));
                 },
                 Event::EndOfFrame => {
-                    qemu_update = true;
+                    if qemu_hacks {
+                        qemu_network_rtt = sdl_timer.ticks() - qemu_prev_update;
+                        qemu_prev_update = sdl_timer.ticks();
+                        qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
+                        debug!("network RTT: {} ms", qemu_network_rtt);
+                    }
                 },
                 Event::Clipboard(ref text) => {
                     let _ = sdl_video.clipboard().set_clipboard_text(text);
@@ -438,13 +445,13 @@ fn main() {
             if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
         }
 
-        if qemu_hacks && qemu_update {
+        if qemu_hacks && sdl_timer.ticks() > qemu_next_update {
             // QEMU ignores incremental update requests and sends non-incremental ones,
             // but does not update framebuffer in them. However, it does update framebuffer
             // (and send it to us) if we change the pixel format, including not actually
             // changing it.
             vnc.poke_qemu().unwrap();
-            qemu_update = false;
+            qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
         } else {
             vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
                                incremental).unwrap();

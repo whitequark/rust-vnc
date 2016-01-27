@@ -146,6 +146,9 @@ fn main() {
         .arg(Arg::with_name("PORT")
                 .help("server port (default: 5900)")
                 .index(2))
+        .arg(Arg::with_name("EXCLUSIVE")
+                .help("request a non-shared session")
+                .long("exclusive"))
         .arg(Arg::with_name("VIEW-ONLY")
                 .help("ignore any input")
                 .long("view-only"))
@@ -156,6 +159,7 @@ fn main() {
 
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
+    let exclusive = matches.is_present("EXCLUSIVE");
     let view_only = matches.is_present("VIEW-ONLY");
     let qemu_hacks = matches.is_present("QEMU-HACKS");
 
@@ -175,7 +179,7 @@ fn main() {
         };
 
     let mut vnc =
-        match vnc::Client::from_tcp_stream(stream, view_only, |methods| {
+        match vnc::Client::from_tcp_stream(stream, !exclusive, |methods| {
             for method in methods {
                 match method {
                     &vnc::client::AuthMethod::None =>

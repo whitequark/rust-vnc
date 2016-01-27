@@ -146,6 +146,9 @@ fn main() {
         .arg(Arg::with_name("PORT")
                 .help("server port (default: 5900)")
                 .index(2))
+        .arg(Arg::with_name("VIEW-ONLY")
+                .help("ignore any input")
+                .long("view-only"))
         .arg(Arg::with_name("QEMU-HACKS")
                 .help("hack around QEMU/XenHVM's braindead VNC server")
                 .long("heinous-qemu-hacks"))
@@ -153,6 +156,7 @@ fn main() {
 
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
+    let view_only = matches.is_present("VIEW-ONLY");
     let qemu_hacks = matches.is_present("QEMU-HACKS");
 
     let sdl_context = sdl2::init().unwrap();
@@ -171,7 +175,7 @@ fn main() {
         };
 
     let mut vnc =
-        match vnc::Client::from_tcp_stream(stream, false, |methods| {
+        match vnc::Client::from_tcp_stream(stream, view_only, |methods| {
             for method in methods {
                 match method {
                     &vnc::client::AuthMethod::None =>
@@ -381,6 +385,12 @@ fn main() {
                     renderer.copy(&screen, None, Some(screen_rect));
                     renderer.present()
                 },
+                _ => ()
+            }
+
+            if view_only { continue }
+
+            match event {
                 Event::KeyDown { keycode: Some(keycode), .. } |
                 Event::KeyUp { keycode: Some(keycode), .. } => {
                     use sdl2::keyboard::Keycode;
@@ -441,8 +451,6 @@ fn main() {
                 },
                 _ => ()
             }
-
-            if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
         }
 
         if qemu_hacks && sdl_timer.ticks() > qemu_next_update {

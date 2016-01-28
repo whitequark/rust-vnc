@@ -36,127 +36,112 @@ pub enum Event {
     Bell,
 }
 
-macro_rules! send_or_return {
-    ($chan:expr, $data:expr) => ({
-        match $chan.send($data) {
-            Ok(()) => (),
-            Err(_) => return Ok(false)
-        }
-    })
-}
-
 impl Event {
-    fn pump_one(stream: &mut TcpStream, format: &Arc<Mutex<protocol::PixelFormat>>,
-                zrle_decoder: &mut zrle::Decoder, tx_events: &mut Sender<Event>) -> Result<bool> {
-        let packet =
-            match protocol::S2C::read_from(stream) {
-                Ok(packet) => packet,
-                Err(Error::Disconnected) => {
-                    send_or_return!(tx_events, Event::Disconnected(None));
-                    return Ok(false)
-                },
-                Err(error) => return Err(error)
-            };
-        debug!("<- {:?}", packet);
-
-        let format = *format.lock().unwrap();
-        match packet {
-            protocol::S2C::SetColourMapEntries { first_colour, colours } => {
-                send_or_return!(tx_events, Event::SetColourMap {
-                    first_colour: first_colour, colours: colours
-                })
-            },
-            protocol::S2C::FramebufferUpdate { count } => {
-                for _ in 0..count {
-                    let rectangle = try!(protocol::Rectangle::read_from(stream));
-                    debug!("<- {:?}", rectangle);
-
-                    let dst = Rect {
-                        left:   rectangle.x_position,
-                        top:    rectangle.y_position,
-                        width:  rectangle.width,
-                        height: rectangle.height
-                    };
-                    match rectangle.encoding {
-                        protocol::Encoding::Raw => {
-                            let mut pixels = vec![0; (rectangle.width as usize) *
-                                                     (rectangle.height as usize) *
-                                                     (format.bits_per_pixel as usize / 8)];
-                            try!(stream.read_exact(&mut pixels));
-                            debug!("<- ...pixels");
-                            send_or_return!(tx_events, Event::PutPixels(dst, pixels))
-                        },
-                        protocol::Encoding::CopyRect => {
-                            let copy_rect = try!(protocol::CopyRect::read_from(stream));
-                            let src = Rect {
-                                left:   copy_rect.src_x_position,
-                                top:    copy_rect.src_y_position,
-                                width:  rectangle.width,
-                                height: rectangle.height
-                            };
-                            send_or_return!(tx_events, Event::CopyPixels { src: src, dst: dst })
-                        },
-                        protocol::Encoding::Zrle => {
-                            let length = try!(stream.read_u32::<BigEndian>());
-                            let mut data = vec![0; length as usize];
-                            try!(stream.read_exact(&mut data));
-                            debug!("<- ...compressed pixels");
-                            let result = try!(zrle_decoder.decode(format, dst, &data,
-                                |tile, pixels| {
-                                    send_or_return!(tx_events, Event::PutPixels(tile, pixels));
-                                    Ok(true)
-                                }));
-                            if !result { return Ok(false) }
-                        }
-                        protocol::Encoding::Cursor => {
-                            let mut pixels    = vec![0; (rectangle.width as usize) *
-                                                        (rectangle.height as usize) *
-                                                        (format.bits_per_pixel as usize / 8)];
-                            try!(stream.read_exact(&mut pixels));
-                            let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
-                                                        (rectangle.height as usize)];
-                            try!(stream.read_exact(&mut mask_bits));
-                            send_or_return!(tx_events, Event::SetCursor {
-                                size:      (rectangle.width, rectangle.height),
-                                hotspot:   (rectangle.x_position, rectangle.y_position),
-                                pixels:    pixels,
-                                mask_bits: mask_bits
-                            })
-                        },
-                        protocol::Encoding::DesktopSize => {
-                            send_or_return!(tx_events,
-                                Event::Resize(rectangle.width, rectangle.height))
-                        }
-                        _ => return Err(Error::Unexpected("encoding"))
-                    };
+    fn pump(mut stream: TcpStream, format: Arc<Mutex<protocol::PixelFormat>>,
+            tx_events: &mut Sender<Event>) -> Result<()> {
+        macro_rules! send {
+            ($chan:expr, $data:expr) => ({
+                match $chan.send($data) {
+                    Ok(()) => (),
+                    Err(_) => break
                 }
+            })
+        }
 
-                send_or_return!(tx_events, Event::EndOfFrame);
-            },
-            protocol::S2C::Bell =>
-                send_or_return!(tx_events, Event::Bell),
-            protocol::S2C::CutText(text) =>
-                send_or_return!(tx_events, Event::Clipboard(text))
-        };
-        Ok(true)
-    }
-
-    fn pump(mut stream: TcpStream, format: Arc<Mutex<protocol::PixelFormat>>) -> Receiver<Event> {
-        let (mut tx_events, rx_events) = channel();
-        thread::spawn(move || {
-            let mut zrle_decoder = zrle::Decoder::new();
-            loop {
-                match Event::pump_one(&mut stream, &format, &mut zrle_decoder, &mut tx_events) {
-                    Ok(true) => (),
-                    Ok(false) => break,
-                    Err(error) => {
-                        let _ = tx_events.send(Event::Disconnected(Some(error)));
+        let mut zrle_decoder = zrle::Decoder::new();
+        loop {
+            let packet =
+                match protocol::S2C::read_from(&mut stream) {
+                    Ok(packet) => packet,
+                    Err(Error::Disconnected) => {
+                        send!(tx_events, Event::Disconnected(None));
                         break
+                    },
+                    Err(error) => return Err(error)
+                };
+            debug!("<- {:?}", packet);
+
+            let format = *format.lock().unwrap();
+            match packet {
+                protocol::S2C::SetColourMapEntries { first_colour, colours } => {
+                    send!(tx_events, Event::SetColourMap {
+                        first_colour: first_colour, colours: colours
+                    })
+                },
+                protocol::S2C::FramebufferUpdate { count } => {
+                    for _ in 0..count {
+                        let rectangle = try!(protocol::Rectangle::read_from(&mut stream));
+                        debug!("<- {:?}", rectangle);
+
+                        let dst = Rect {
+                            left:   rectangle.x_position,
+                            top:    rectangle.y_position,
+                            width:  rectangle.width,
+                            height: rectangle.height
+                        };
+                        match rectangle.encoding {
+                            protocol::Encoding::Raw => {
+                                let mut pixels = vec![0; (rectangle.width as usize) *
+                                                         (rectangle.height as usize) *
+                                                         (format.bits_per_pixel as usize / 8)];
+                                try!(stream.read_exact(&mut pixels));
+                                debug!("<- ...pixels");
+                                send!(tx_events, Event::PutPixels(dst, pixels))
+                            },
+                            protocol::Encoding::CopyRect => {
+                                let copy_rect = try!(protocol::CopyRect::read_from(&mut stream));
+                                let src = Rect {
+                                    left:   copy_rect.src_x_position,
+                                    top:    copy_rect.src_y_position,
+                                    width:  rectangle.width,
+                                    height: rectangle.height
+                                };
+                                send!(tx_events, Event::CopyPixels { src: src, dst: dst })
+                            },
+                            protocol::Encoding::Zrle => {
+                                let length = try!(stream.read_u32::<BigEndian>());
+                                let mut data = vec![0; length as usize];
+                                try!(stream.read_exact(&mut data));
+                                debug!("<- ...compressed pixels");
+                                let result = try!(zrle_decoder.decode(format, dst, &data,
+                                    |tile, pixels| {
+                                        Ok(tx_events.send(Event::PutPixels(tile, pixels)).is_ok())
+                                    }));
+                                if !result { break }
+                            }
+                            protocol::Encoding::Cursor => {
+                                let mut pixels    = vec![0; (rectangle.width as usize) *
+                                                            (rectangle.height as usize) *
+                                                            (format.bits_per_pixel as usize / 8)];
+                                try!(stream.read_exact(&mut pixels));
+                                let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
+                                                            (rectangle.height as usize)];
+                                try!(stream.read_exact(&mut mask_bits));
+                                send!(tx_events, Event::SetCursor {
+                                    size:      (rectangle.width, rectangle.height),
+                                    hotspot:   (rectangle.x_position, rectangle.y_position),
+                                    pixels:    pixels,
+                                    mask_bits: mask_bits
+                                })
+                            },
+                            protocol::Encoding::DesktopSize => {
+                                send!(tx_events,
+                                    Event::Resize(rectangle.width, rectangle.height))
+                            }
+                            _ => return Err(Error::Unexpected("encoding"))
+                        };
                     }
-                }
+
+                    send!(tx_events, Event::EndOfFrame);
+                },
+                protocol::S2C::Bell =>
+                    send!(tx_events, Event::Bell),
+                protocol::S2C::CutText(text) =>
+                    send!(tx_events, Event::Clipboard(text))
             }
-        });
-        rx_events
+        }
+
+        Ok(())
     }
 }
 
@@ -256,11 +241,21 @@ impl Client {
         debug!("<- {:?}", server_init);
 
         let format = Arc::new(Mutex::new(server_init.pixel_format));
-        let events = Event::pump(stream.try_clone().unwrap(), format.clone());
+
+        let (tx_events, rx_events) = channel();
+        {
+            let stream = stream.try_clone().unwrap();
+            let format = format.clone();
+            thread::spawn(move || {
+                let mut tx_events = tx_events;
+                let error = Event::pump(stream, format, &mut tx_events).err();
+                let _ = tx_events.send(Event::Disconnected(error));
+            });
+        }
 
         Ok(Client {
             stream:  stream,
-            events:  events,
+            events:  rx_events,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
             format:  format

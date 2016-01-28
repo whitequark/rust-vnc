@@ -297,7 +297,9 @@ fn main() {
                 },
                 Event::EndOfFrame => {
                     if qemu_hacks {
-                        qemu_network_rtt = sdl_timer.ticks() - qemu_prev_update;
+                        let  network_rtt = sdl_timer.ticks() - qemu_prev_update;
+                        // qemu_network_rtt = network_rtt;
+                        qemu_network_rtt = qemu_network_rtt * 80 / 100 + network_rtt * 20 / 100;
                         qemu_prev_update = sdl_timer.ticks();
                         qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
                         debug!("network RTT: {} ms", qemu_network_rtt);

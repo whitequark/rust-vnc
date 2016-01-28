@@ -1,6 +1,6 @@
 [package]
 name = "vnc"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["whitequark <whitequark@whitequark.org>"]
 license = "MIT/Apache-2.0"
 readme = "README.md"

@@ -34,7 +34,7 @@ To use the VNC library in your project, add the following to `Cargo.toml`:
 
 ```toml
 [dependencies]
-vnc = "^0.2"
+vnc = "^0.3"
 ```
 
 Why?

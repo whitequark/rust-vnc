@@ -114,12 +114,6 @@ impl Decoder {
     pub fn decode<F>(&mut self, format: protocol::PixelFormat, rect: Rect,
                  input: &[u8], mut callback: F) -> Result<bool>
             where F: FnMut(Rect, Vec<u8>) -> Result<bool> {
-        fn read_pixel(reader: &mut Read, pad: bool, bpp: usize) -> Result<[u8; 4]> {
-            let mut entry = [0; 4];
-            try!(reader.read_exact(&mut entry[if pad { 1 } else { 0 }..bpp]));
-            Ok(entry)
-        }
-
         fn read_run_length(reader: &mut Read) -> Result<usize> {
             let mut run_length_part = try!(reader.read_u8());
             let mut run_length = 1 + run_length_part as usize;
@@ -128,6 +122,19 @@ impl Decoder {
                 run_length += run_length_part as usize;
             }
             Ok(run_length)
+        }
+
+        fn copy_true_color(reader: &mut Read, pixels: &mut Vec<u8>,
+                           pad: bool, compressed_bpp: usize, bpp: usize) -> Result<()> {
+            let mut buf = [0; 4];
+            try!(reader.read_exact(&mut buf[pad as usize..pad as usize + compressed_bpp]));
+            pixels.extend_from_slice(&buf[..bpp]);
+            Ok(())
+        }
+
+        fn copy_indexed(palette: &[u8], pixels: &mut Vec<u8>, bpp: usize, index: u8) {
+            let start = index as usize * bpp;
+            pixels.extend_from_slice(&palette[start..start + bpp])
         }
 
         let bpp = format.bits_per_pixel as usize / 8;
@@ -145,10 +152,11 @@ impl Decoder {
                     (4, false)
                 }
             } else {
-                (format.bits_per_pixel as usize / 4, false)
+                (bpp, false)
             };
 
-        let mut reader = BitReader::new(ZlibReader::new(self.decompressor.take().unwrap(), input));
+        let mut palette = Vec::with_capacity(128 * bpp);
+        let mut reader  = BitReader::new(ZlibReader::new(self.decompressor.take().unwrap(), input));
 
         let mut y = 0;
         while y < rect.height {
@@ -156,26 +164,28 @@ impl Decoder {
             let mut x = 0;
             while x < rect.width {
                 let width = if x + 64 > rect.width { rect.width - x } else { 64 };
+                let pixel_count = height as usize * width as usize;
 
                 let is_rle = try!(reader.read_bit());
                 let palette_size = try!(reader.read_bits(7));
 
-                let mut palette = Vec::<[u8; 4]>::new();
+                palette.truncate(0);
                 for _ in 0..palette_size {
-                    palette.push(try!(read_pixel(&mut reader, pad_pixel, compressed_bpp)))
+                    try!(copy_true_color(&mut reader, &mut palette,
+                                         pad_pixel, compressed_bpp, bpp))
                 }
 
-                let mut pixels = Vec::new();
+                let mut pixels = Vec::with_capacity(pixel_count * bpp);
                 match (is_rle, palette_size) {
-                    (false, 0) => { // Raw pixels
-                        for _ in 0..width * height {
-                            let pixel = try!(read_pixel(&mut reader, pad_pixel, compressed_bpp));
-                            pixels.extend_from_slice(&pixel[0..bpp]);
+                    (false, 0) => { // True Color pixels
+                        for _ in 0..pixel_count {
+                            try!(copy_true_color(&mut reader, &mut pixels,
+                                                 pad_pixel, compressed_bpp, bpp))
                         }
                     },
                     (false, 1) => { // Color fill
-                        for _ in 0..width * height {
-                            pixels.extend_from_slice(&palette[0][0..bpp]);
+                        for _ in 0..pixel_count {
+                            copy_indexed(&palette, &mut pixels, bpp, 0)
                         }
                     },
                     (false, 2) | (false, 3...4) | (false, 5...16) => { // Indexed pixels
@@ -186,25 +196,28 @@ impl Decoder {
                         for _ in 0..height {
                             for _ in 0..width {
                                 let index = try!(reader.read_bits(bits_per_index));
-                                pixels.extend_from_slice(&palette[index as usize][0..bpp])
+                                copy_indexed(&palette, &mut pixels, bpp, index)
                             }
                             reader.align();
                         }
                     },
-                    (true, 0) => { // Raw RLE
+                    (true, 0) => { // True Color RLE
                         let mut count = 0;
-                        while count < (width * height) as usize {
-                            let pixel = try!(read_pixel(&mut reader, pad_pixel, compressed_bpp));
+                        let mut pixel = Vec::new();
+                        while count < pixel_count {
+                            pixel.truncate(0);
+                            try!(copy_true_color(&mut reader, &mut pixel,
+                                                 pad_pixel, compressed_bpp, bpp));
                             let run_length = try!(read_run_length(&mut reader));
                             for _ in 0..run_length {
-                                pixels.extend_from_slice(&pixel[0..bpp]);
+                                pixels.extend(&pixel)
                             }
                             count += run_length;
                         }
                     },
                     (true, 2...127) => { // Indexed RLE
                         let mut count = 0;
-                        while count < (width * height) as usize {
+                        while count < pixel_count {
                             let longer_than_one = try!(reader.read_bit());
                             let index = try!(reader.read_bits(7));
                             let run_length =
@@ -214,7 +227,7 @@ impl Decoder {
                                     1
                                 };
                             for _ in 0..run_length {
-                                pixels.extend_from_slice(&palette[index as usize][0..bpp]);
+                                copy_indexed(&palette, &mut pixels, bpp, index);
                             }
                             count += run_length;
                         }

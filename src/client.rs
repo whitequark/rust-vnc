@@ -81,9 +81,11 @@ impl Event {
                         };
                         match rectangle.encoding {
                             protocol::Encoding::Raw => {
-                                let mut pixels = vec![0; (rectangle.width as usize) *
-                                                         (rectangle.height as usize) *
-                                                         (format.bits_per_pixel as usize / 8)];
+                                let length = (rectangle.width as usize) *
+                                             (rectangle.height as usize) *
+                                             (format.bits_per_pixel as usize / 8);
+                                let mut pixels = Vec::with_capacity(length);
+                                unsafe { pixels.set_len(length as usize) }
                                 try!(stream.read_exact(&mut pixels));
                                 debug!("<- ...pixels");
                                 send!(tx_events, Event::PutPixels(dst, pixels))
@@ -100,7 +102,8 @@ impl Event {
                             },
                             protocol::Encoding::Zrle => {
                                 let length = try!(stream.read_u32::<BigEndian>());
-                                let mut data = vec![0; length as usize];
+                                let mut data = Vec::with_capacity(length as usize);
+                                unsafe { data.set_len(length as usize) }
                                 try!(stream.read_exact(&mut data));
                                 debug!("<- ...compressed pixels");
                                 let result = try!(zrle_decoder.decode(format, dst, &data,

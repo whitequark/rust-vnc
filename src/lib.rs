@@ -1,5 +1,4 @@
 #[macro_use] extern crate log;
-// TODO: https://github.com/BurntSushi/byteorder/pull/40
 extern crate byteorder;
 extern crate flate2;
 
@@ -68,16 +67,6 @@ impl std::error::Error for Error {
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Error { Error::Io(error) }
-}
-
-impl From<byteorder::Error> for Error {
-    fn from(error: byteorder::Error) -> Error {
-        match error {
-            byteorder::Error::UnexpectedEOF =>
-                Error::Io(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, error)),
-            byteorder::Error::Io(inner) => Error::Io(inner)
-        }
-    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

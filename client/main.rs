@@ -6,7 +6,7 @@ extern crate sdl2;
 extern crate x11;
 extern crate byteorder;
 
-use std::io::{Read, Write, Cursor};
+use std::io::{Result as IoResult, ErrorKind as IoErrorKind, Read, Write, Cursor};
 use clap::{Arg, App};
 use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum as SdlPixelFormat};
 use sdl2::rect::Rect as SdlRect;
@@ -92,7 +92,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
     let mut mask_cursor = Cursor::new(mask_pixels);
 
     fn read_color<R: Read>(reader: &mut R, size: usize, masks: &PixelMasks) ->
-            byteorder::Result<Color> {
+            IoResult<Color> {
         let packed = try!(reader.read_uint::<NativeEndian>(size));
         Ok(Color::RGB(
             ((packed as u32 & masks.rmask) >> masks.rmask.trailing_zeros()) as u8,
@@ -102,7 +102,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
     }
 
     fn write_color<W: Write>(writer: &mut W, size: usize, masks: &PixelMasks, color: Color) ->
-            byteorder::Result<()> {
+            IoResult<()> {
         let packed = match color {
             Color::RGBA(r, g, b, a) => {
                 (((r as u32) << masks.rmask.trailing_zeros()) & masks.rmask) |
@@ -118,7 +118,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
 
     loop {
         match read_color(&mut in_cursor, in_size, &in_masks) {
-            Err(byteorder::Error::UnexpectedEOF) => break,
+            Err(ref e) if e.kind() == IoErrorKind::UnexpectedEof => break,
             Err(_) => unreachable!(),
             Ok(in_color) => {
                 let mask = mask_cursor.read_u8().unwrap();

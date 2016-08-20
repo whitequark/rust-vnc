@@ -1,6 +1,5 @@
-use std;
-use std::io::{Read, Write};
-use byteorder::{self, BigEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{ErrorKind as IoErrorKind, Read, Write};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use ::{Error, Result};
 
 pub trait Message {
@@ -224,7 +223,7 @@ pub struct ServerInit {
     pub framebuffer_width:  u16,
     pub framebuffer_height: u16,
     pub pixel_format:       PixelFormat,
-    pub name:               std::string::String
+    pub name:               String
 }
 
 impl Message for ServerInit {
@@ -341,7 +340,8 @@ impl Message for C2S {
     fn read_from<R: Read>(reader: &mut R) -> Result<C2S> {
         let message_type =
             match reader.read_u8() {
-                Err(byteorder::Error::UnexpectedEOF) => return Err(Error::Disconnected),
+                Err(ref e) if e.kind() == IoErrorKind::UnexpectedEof =>
+                    return Err(Error::Disconnected),
                 result => try!(result)
             };
         match message_type {
@@ -504,7 +504,8 @@ impl Message for S2C {
     fn read_from<R: Read>(reader: &mut R) -> Result<S2C> {
         let message_type =
             match reader.read_u8() {
-                Err(byteorder::Error::UnexpectedEOF) => return Err(Error::Disconnected),
+                Err(ref e) if e.kind() == IoErrorKind::UnexpectedEof =>
+                    return Err(Error::Disconnected),
                 result => try!(result)
             };
         match message_type {

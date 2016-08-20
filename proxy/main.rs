@@ -8,7 +8,7 @@ use clap::{Arg, App};
 fn main() {
     env_logger::init().unwrap();
 
-    let matches = App::new("rvncclient")
+    let matches = App::new("rvncproxy")
         .about("VNC proxy")
         .arg(Arg::with_name("CONNECT-HOST")
                 .help("server hostname or IP")

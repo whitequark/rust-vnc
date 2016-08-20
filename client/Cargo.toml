@@ -1,0 +1,25 @@
+[package]
+name = "vnc-client"
+version = "1.0.0"
+authors = ["whitequark <whitequark@whitequark.org>"]
+license = "MIT/Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/whitequark/rust-vnc"
+homepage = "https://github.com/whitequark/rust-vnc"
+description = "A VNC client"
+
+[[bin]]
+name = "rvncclient"
+path = "main.rs"
+
+[dependencies]
+byteorder = "0.4"
+log = "0.3"
+env_logger = "0.3"
+clap = "1.5"
+sdl2 = "0.13"
+x11 = "2.3"
+
+[dependencies.vnc]
+path = ".."
+version = "0.4"

@@ -1,11 +1,11 @@
 rust-vnc
 ========
 
-rust-vnc is a library implementing the VNC protocol and the client
-state machine. The crate also provides two binaries:
+_vnc_ is a crate implementing the VNC protocol and the client
+state machine. There are also two crates using it:
 
-  * A fully functional VNC client based on SDL2;
-  * A buffering VNC proxy.
+  * A fully functional VNC client based on SDL2, _vnc-client_;
+  * A buffering VNC proxy, _vnc-proxy_.
 
 The VNC client has special hacks to work around the bugs in the VNC serevr
 used in QEMU (and Xen HVM).
@@ -27,14 +27,17 @@ to work around its bugs on the client side. That worked!
 Where?
 ------
 
-To launch the VNC client or proxy, run `cargo install vnc` and then
-`rvncclient --help` or `rvncproxy --help`.
+To launch the VNC client, run `cargo install vnc-client` and then
+`rvncclient --help`.
+
+To launch the VNC proxy, run `cargo install vnc-proxy` and then
+`rvncproxy --help`.
 
 To use the VNC library in your project, add the following to `Cargo.toml`:
 
 ```toml
 [dependencies]
-vnc = "^0.3"
+vnc = "0.4"
 ```
 
 Why?

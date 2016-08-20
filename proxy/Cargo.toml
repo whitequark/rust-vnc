@@ -1,0 +1,22 @@
+[package]
+name = "vnc-proxy"
+version = "1.0.0"
+authors = ["whitequark <whitequark@whitequark.org>"]
+license = "MIT/Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/whitequark/rust-vnc"
+homepage = "https://github.com/whitequark/rust-vnc"
+description = "A VNC proxy"
+
+[[bin]]
+name = "rvncproxy"
+path = "main.rs"
+
+[dependencies]
+log = "0.3"
+env_logger = "0.3"
+clap = "1.5"
+
+[dependencies.vnc]
+path = ".."
+version = "0.4"

@@ -146,6 +146,10 @@ fn main() {
         .arg(Arg::with_name("PORT")
                 .help("server port (default: 5900)")
                 .index(2))
+        .arg(Arg::with_name("PASSWORD")
+                .help("server password")
+                .long("password")
+                .takes_value(true))
         .arg(Arg::with_name("EXCLUSIVE")
                 .help("request a non-shared session")
                 .long("exclusive"))
@@ -159,6 +163,7 @@ fn main() {
 
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
+    let password = matches.value_of("PASSWORD");
     let exclusive = matches.is_present("EXCLUSIVE");
     let view_only = matches.is_present("VIEW-ONLY");
     let qemu_hacks = matches.is_present("QEMU-HACKS");
@@ -180,10 +185,24 @@ fn main() {
 
     let mut vnc =
         match vnc::Client::from_tcp_stream(stream, !exclusive, |methods| {
+            debug!("available authentication methods: {:?}", methods);
             for method in methods {
                 match method {
                     &vnc::client::AuthMethod::None =>
                         return Some(vnc::client::AuthChoice::None),
+                    &vnc::client::AuthMethod::Password => {
+                        return match password {
+                            None => None,
+                            Some(ref password) => {
+                                let mut key = [0; 8];
+                                for (i, byte) in password.bytes().enumerate() {
+                                    if i == 8 { break }
+                                    key[i] = byte
+                                }
+                                Some(vnc::client::AuthChoice::Password(key))
+                            }
+                        }
+                    }
                     _ => ()
                 }
             }

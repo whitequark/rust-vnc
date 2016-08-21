@@ -1,15 +1,16 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpStream, Shutdown};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use byteorder::{BigEndian, ReadBytesExt};
-use ::{zrle, protocol, Rect, Colour, Error, Result};
+use ::{zrle, protocol, des, Rect, Colour, Error, Result};
 use protocol::Message;
 
 #[derive(Debug)]
 pub enum AuthMethod {
     None,
+    Password,
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -18,6 +19,7 @@ pub enum AuthMethod {
 #[derive(Debug)]
 pub enum AuthChoice {
     None,
+    Password([u8; 8]),
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -193,6 +195,8 @@ impl Client {
             match security_type {
                 protocol::SecurityType::None =>
                     auth_methods.push(AuthMethod::None),
+                protocol::SecurityType::VncAuthentication =>
+                    auth_methods.push(AuthMethod::Password),
                 _ => ()
             }
         }
@@ -204,11 +208,23 @@ impl Client {
             _ => {
                 let used_security_type = match auth_choice {
                     AuthChoice::None => protocol::SecurityType::None,
+                    AuthChoice::Password(_) => protocol::SecurityType::VncAuthentication,
                     AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
                 try!(protocol::SecurityType::write_to(&used_security_type, &mut stream));
             }
+        }
+
+        match auth_choice {
+            AuthChoice::None => (),
+            AuthChoice::Password(password) => {
+                let mut challenge = [0; 16];
+                try!(stream.read_exact(&mut challenge));
+                let response = des::encrypt(&challenge, &password);
+                try!(stream.write(&response));
+            },
+            AuthChoice::__Nonexhaustive => unreachable!()
         }
 
         let mut skip_security_result = false;

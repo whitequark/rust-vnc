@@ -4,6 +4,7 @@ extern crate flate2;
 
 mod protocol;
 mod zrle;
+mod des;
 
 pub mod client;
 pub mod proxy;

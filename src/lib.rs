@@ -7,7 +7,7 @@ extern crate crypto;
 
 mod protocol;
 mod zrle;
-mod des;
+mod security;
 
 pub mod client;
 pub mod proxy;

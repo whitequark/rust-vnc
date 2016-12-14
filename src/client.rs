@@ -3,14 +3,21 @@ use std::net::{TcpStream, Shutdown};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
+use std::cmp::min;
 use byteorder::{BigEndian, ReadBytesExt};
 use ::{zrle, protocol, des, Rect, Colour, Error, Result};
 use protocol::Message;
+use octavo::crypto::asymmetric::dh::{DHParameters, DHPublicKey};
+use octavo::digest::prelude::{Digest, Md5};
+use num_bigint::BigUint;
+use crypto::aessafe::AesSafe128Encryptor;
+use crypto::symmetriccipher::BlockEncryptor;
 
 #[derive(Debug)]
 pub enum AuthMethod {
     None,
     Password,
+    AppleRemoteDesktop,
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -20,6 +27,7 @@ pub enum AuthMethod {
 pub enum AuthChoice {
     None,
     Password([u8; 8]),
+    AppleRemoteDesktop(String, String),
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -197,6 +205,8 @@ impl Client {
                     auth_methods.push(AuthMethod::None),
                 protocol::SecurityType::VncAuthentication =>
                     auth_methods.push(AuthMethod::Password),
+                protocol::SecurityType::AppleRemoteDesktop =>
+                    auth_methods.push(AuthMethod::AppleRemoteDesktop),
                 _ => ()
             }
         }
@@ -209,6 +219,7 @@ impl Client {
                 let used_security_type = match auth_choice {
                     AuthChoice::None => protocol::SecurityType::None,
                     AuthChoice::Password(_) => protocol::SecurityType::VncAuthentication,
+                    AuthChoice::AppleRemoteDesktop(_, _) => protocol::SecurityType::AppleRemoteDesktop,
                     AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
@@ -239,6 +250,39 @@ impl Client {
                 try!(stream.read_exact(&mut challenge));
                 let response = des::encrypt(&challenge, &password);
                 try!(stream.write(&response));
+            },
+            AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
+                // http://cafbit.com/entry/apple_remote_desktop_quirks
+                let handshake = try!(protocol::AppleAuthHandshake::read_from(&mut stream));
+                let param = DHParameters::new(&handshake.prime, handshake.generator as u64);
+                let priv_key = param.private_key();
+                let pub_key = priv_key.public_key();
+                let secret =
+                    md5(
+                        &priv_key.exchange(&DHPublicKey::new(
+                            BigUint::from_bytes_be(&handshake.peer_key)
+                        )).to_bytes_be()
+                    );
+
+                let mut credentials = [0u8; 128];
+                let ul = min(64, username.len());
+                credentials[0..ul].copy_from_slice(&username.as_bytes()[0..ul]);
+                let pl = min(64, password.len());
+                credentials[64..(64 + pl)].copy_from_slice(&password.as_bytes()[0..pl]);
+
+                let mut ciphertext = [0u8; 128];
+                let aes = AesSafe128Encryptor::new(&secret);
+                for i in 0..(credentials.len() / aes.block_size()) {
+                    let start = i * aes.block_size();
+                    let end = (i + 1) * aes.block_size();
+                    let input = &credentials[start..end];
+                    aes.encrypt_block(input, &mut ciphertext[start..end]);
+                }
+                let response = protocol::AppleAuthResponse {
+                    ciphertext: ciphertext,
+                    pub_key: pub_key.key().to_bytes_be(),
+                };
+                try!(response.write_to(&mut stream));
             },
             AuthChoice::__Nonexhaustive => unreachable!()
         }
@@ -418,4 +462,12 @@ impl<'a> Iterator for EventPollIterator<'a> {
     type Item = Event;
 
     fn next(&mut self) -> Option<Self::Item> { self.client.poll_event() }
+}
+
+fn md5(data: &[u8]) -> [u8; 16] {
+    let mut md5 = Md5::default();
+    md5.update(data);
+    let mut result = [0; 16];
+    md5.result(&mut result);
+    result
 }

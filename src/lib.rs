@@ -1,6 +1,9 @@
 #[macro_use] extern crate log;
 extern crate byteorder;
 extern crate flate2;
+extern crate num_bigint;
+extern crate octavo;
+extern crate crypto;
 
 mod protocol;
 mod zrle;

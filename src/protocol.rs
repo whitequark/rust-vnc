@@ -56,6 +56,8 @@ impl Message for Version {
             b"RFB 003.003\n" => Ok(Version::Rfb33),
             b"RFB 003.007\n" => Ok(Version::Rfb37),
             b"RFB 003.008\n" => Ok(Version::Rfb38),
+            // Apple remote desktop
+            b"RFB 003.889\n" => Ok(Version::Rfb38),
             _ => Err(Error::Unexpected("protocol version"))
         }
     }
@@ -78,6 +80,7 @@ pub enum SecurityType {
     None,
     VncAuthentication,
     // extensions
+    AppleRemoteDesktop,
 }
 
 impl Message for SecurityType {
@@ -87,6 +90,7 @@ impl Message for SecurityType {
             0  => Ok(SecurityType::Invalid),
             1  => Ok(SecurityType::None),
             2  => Ok(SecurityType::VncAuthentication),
+            30 => Ok(SecurityType::AppleRemoteDesktop),
             n  => Ok(SecurityType::Unknown(n))
         }
     }
@@ -96,6 +100,7 @@ impl Message for SecurityType {
             &SecurityType::Invalid => 0,
             &SecurityType::None => 1,
             &SecurityType::VncAuthentication => 2,
+            &SecurityType::AppleRemoteDesktop => 30,
             &SecurityType::Unknown(n) => n
         };
         try!(writer.write_u8(security_type));
@@ -148,6 +153,53 @@ impl Message for SecurityResult {
             &SecurityResult::Failed => 1
         };
         try!(writer.write_u32::<BigEndian>(result));
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct AppleAuthHandshake {
+    pub generator: u16,
+    pub prime: Vec<u8>,
+    pub peer_key: Vec<u8>,
+}
+
+impl Message for AppleAuthHandshake {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
+        let generator = try!(reader.read_u16::<BigEndian>());
+        let key_length = try!(reader.read_u16::<BigEndian>());
+
+        let mut prime = vec![0; key_length as usize];
+        try!(reader.read_exact(&mut prime));
+
+        let mut peer_key = vec![0; key_length as usize];
+        try!(reader.read_exact(&mut peer_key));
+
+        Ok(AppleAuthHandshake {
+            generator: generator,
+            prime: prime,
+            peer_key: peer_key,
+        })
+    }
+
+    fn write_to<W: Write>(&self, _writer: &mut W) -> Result<()> {
+        unreachable!()
+    }
+}
+
+pub struct AppleAuthResponse {
+    pub ciphertext: [u8; 128],
+    pub pub_key: Vec<u8>,
+}
+
+impl Message for AppleAuthResponse {
+    fn read_from<R: Read>(_reader: &mut R) -> Result<Self> {
+        unreachable!()
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        try!(writer.write_all(&self.ciphertext));
+        try!(writer.write_all(&self.pub_key));
         Ok(())
     }
 }

@@ -146,6 +146,10 @@ fn main() {
         .arg(Arg::with_name("PORT")
                 .help("server port (default: 5900)")
                 .index(2))
+        .arg(Arg::with_name("USERNAME")
+                .help("server username")
+                .long("username")
+                .takes_value(true))
         .arg(Arg::with_name("PASSWORD")
                 .help("server password")
                 .long("password")
@@ -163,6 +167,7 @@ fn main() {
 
     let host = matches.value_of("HOST").unwrap();
     let port = value_t!(matches.value_of("PORT"), u16).unwrap_or(5900);
+    let username = matches.value_of("USERNAME");
     let password = matches.value_of("PASSWORD");
     let exclusive = matches.is_present("EXCLUSIVE");
     let view_only = matches.is_present("VIEW-ONLY");
@@ -202,7 +207,16 @@ fn main() {
                                 Some(vnc::client::AuthChoice::Password(key))
                             }
                         }
-                    }
+                    },
+                    &vnc::client::AuthMethod::AppleRemoteDesktop =>
+                        match (username, password) {
+                            (Some(username), Some(password)) =>
+                                return Some(vnc::client::AuthChoice::AppleRemoteDesktop(
+                                    username.to_owned(), password.to_owned()
+                                )),
+                            _ =>
+                                ()
+                        },
                     _ => ()
                 }
             }

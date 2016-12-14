@@ -13,6 +13,10 @@ description = "An implementation of VNC protocol, client state machine, a client
 log = "0.3"
 byteorder = "0.5"
 flate2 = "0.2.13"
+num-bigint = "*"
+# Diffie-Hellman key exchange only in octavo > 0.1.1
+octavo = { git = "https://github.com/libOctavo/octavo", rev = "d94d924616dca83b9c6cfc815062276c5908713a" }
+rust-crypto = "0.2.36"
 
 [workspace]
 members = ["client", "proxy"]

@@ -187,6 +187,7 @@ impl Message for AppleAuthHandshake {
     }
 }
 
+#[allow(dead_code)]
 pub struct AppleAuthResponse {
     pub ciphertext: [u8; 128],
     pub pub_key: Vec<u8>,

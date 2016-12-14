@@ -6,7 +6,9 @@ use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use byteorder::{BigEndian, ReadBytesExt};
 use ::{zrle, protocol, Rect, Colour, Error, Result};
 use protocol::Message;
-use security::{des, apple_auth};
+use security::des;
+#[cfg(feature = "apple-auth")]
+use security::apple_auth;
 
 #[derive(Debug)]
 pub enum AuthMethod {
@@ -223,7 +225,6 @@ impl Client {
         }
 
         match auth_choice {
-            AuthChoice::None => (),
             AuthChoice::Password(mut password) => {
                 // Reverse the bits in every byte of password.
                 // DES is 56-bit and as commonly implemented, it takes a 8-octet key
@@ -246,12 +247,13 @@ impl Client {
                 let response = des(&challenge, &password);
                 try!(stream.write(&response));
             },
+            #[cfg(feature = "apple-auth")]
             AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
                 let handshake = try!(protocol::AppleAuthHandshake::read_from(&mut stream));
                 let response = apple_auth(username, password, &handshake);
                 try!(response.write_to(&mut stream));
             },
-            AuthChoice::__Nonexhaustive => unreachable!()
+            _ => (),
         }
 
         let mut skip_security_result = false;

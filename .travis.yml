@@ -18,7 +18,7 @@ script:
   - cargo build --features "$FEATURES"
   - cargo test --features "$FEATURES"
   - (cd client && cargo build --features "$FEATURES")
-  - (cd proxy && cargo build)
+  - (cd proxy && cargo build --features "$FEATURES")
 after_script:
   - |
     if [ "${TRAVIS_BRANCH}" = "master" -a -n "${GH_TOKEN}" ]; then

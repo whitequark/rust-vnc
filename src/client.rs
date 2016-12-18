@@ -4,13 +4,17 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use byteorder::{BigEndian, ReadBytesExt};
-use ::{zrle, protocol, des, Rect, Colour, Error, Result};
+use ::{zrle, protocol, Rect, Colour, Error, Result};
 use protocol::Message;
+use security::des;
+#[cfg(feature = "apple-auth")]
+use security::apple_auth;
 
 #[derive(Debug)]
 pub enum AuthMethod {
     None,
     Password,
+    AppleRemoteDesktop,
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -20,6 +24,7 @@ pub enum AuthMethod {
 pub enum AuthChoice {
     None,
     Password([u8; 8]),
+    AppleRemoteDesktop(String, String),
     /* more to come */
     #[doc(hidden)]
     __Nonexhaustive,
@@ -197,6 +202,8 @@ impl Client {
                     auth_methods.push(AuthMethod::None),
                 protocol::SecurityType::VncAuthentication =>
                     auth_methods.push(AuthMethod::Password),
+                protocol::SecurityType::AppleRemoteDesktop =>
+                    auth_methods.push(AuthMethod::AppleRemoteDesktop),
                 _ => ()
             }
         }
@@ -209,6 +216,7 @@ impl Client {
                 let used_security_type = match auth_choice {
                     AuthChoice::None => protocol::SecurityType::None,
                     AuthChoice::Password(_) => protocol::SecurityType::VncAuthentication,
+                    AuthChoice::AppleRemoteDesktop(_, _) => protocol::SecurityType::AppleRemoteDesktop,
                     AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
@@ -217,7 +225,6 @@ impl Client {
         }
 
         match auth_choice {
-            AuthChoice::None => (),
             AuthChoice::Password(mut password) => {
                 // Reverse the bits in every byte of password.
                 // DES is 56-bit and as commonly implemented, it takes a 8-octet key
@@ -237,10 +244,16 @@ impl Client {
 
                 let mut challenge = [0; 16];
                 try!(stream.read_exact(&mut challenge));
-                let response = des::encrypt(&challenge, &password);
+                let response = des(&challenge, &password);
                 try!(stream.write(&response));
             },
-            AuthChoice::__Nonexhaustive => unreachable!()
+            #[cfg(feature = "apple-auth")]
+            AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
+                let handshake = try!(protocol::AppleAuthHandshake::read_from(&mut stream));
+                let response = apple_auth(username, password, &handshake);
+                try!(response.write_to(&mut stream));
+            },
+            _ => (),
         }
 
         let mut skip_security_result = false;

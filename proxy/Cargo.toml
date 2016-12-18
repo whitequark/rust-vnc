@@ -8,6 +8,9 @@ repository = "https://github.com/whitequark/rust-vnc"
 homepage = "https://github.com/whitequark/rust-vnc"
 description = "A VNC proxy"
 
+[features]
+apple-auth = ["vnc/apple-auth"]
+
 [[bin]]
 name = "rvncproxy"
 path = "main.rs"

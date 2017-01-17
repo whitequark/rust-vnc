@@ -7,7 +7,7 @@ state machine. There are also two crates using it:
   * A fully functional VNC client based on SDL2, _vnc-client_;
   * A buffering VNC proxy, _vnc-proxy_.
 
-The VNC client has special hacks to work around the bugs in the VNC serevr
+The VNC client has special hacks to work around the bugs in the VNC server
 used in QEMU (and Xen HVM).
 
 How?

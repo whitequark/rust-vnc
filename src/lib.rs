@@ -8,6 +8,9 @@ extern crate octavo;
 #[cfg(feature = "apple-auth")]
 extern crate crypto;
 
+use std::io::Write;
+use byteorder::{BigEndian, WriteBytesExt};
+
 mod protocol;
 mod zrle;
 mod security;
@@ -27,6 +30,37 @@ pub struct Rect {
     pub top:    u16,
     pub width:  u16,
     pub height: u16
+}
+
+impl Rect {
+    /// Constructs new `Rect`.
+    pub fn new(left: u16, top: u16, width: u16, height: u16) -> Self {
+        Rect {
+            left: left,
+            top: top,
+            width: width,
+            height: height,
+        }
+    }
+
+    /// Constructs new zero-sized `Rect` placed at (0, 0).
+    pub fn new_empty() -> Self {
+        Rect {
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0,
+        }
+    }
+
+    /// Writes `Rect` to given stream.
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        try!(writer.write_u16::<BigEndian>(self.left));
+        try!(writer.write_u16::<BigEndian>(self.top));
+        try!(writer.write_u16::<BigEndian>(self.width));
+        try!(writer.write_u16::<BigEndian>(self.height));
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

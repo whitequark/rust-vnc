@@ -237,6 +237,40 @@ pub struct PixelFormat {
     pub blue_shift:     u8,
 }
 
+impl PixelFormat {
+    /// Creates RGB pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub fn new_rgb8888() -> Self {
+        PixelFormat {
+            bits_per_pixel: 32,
+            depth: 24,
+            big_endian: true,
+            true_colour: true,
+            red_max: 255,
+            green_max: 255,
+            blue_max: 255,
+            red_shift: 0,
+            green_shift: 8,
+            blue_shift: 16,
+        }
+    }
+
+    /// Creates BGR pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub fn new_bgr8888() -> Self {
+        PixelFormat {
+            bits_per_pixel: 32,
+            depth: 24,
+            big_endian: true,
+            true_colour: true,
+            red_max: 255,
+            green_max: 255,
+            blue_max: 255,
+            red_shift: 16,
+            green_shift: 8,
+            blue_shift: 0,
+        }
+    }
+}
+
 impl Message for PixelFormat {
     fn read_from<R: Read>(reader: &mut R) -> Result<PixelFormat> {
         let pixel_format = PixelFormat {
@@ -513,7 +547,7 @@ impl Message for C2S {
 }
 
 #[derive(Debug)]
-pub struct Rectangle {
+pub struct RectangleHeader {
     pub x_position: u16,
     pub y_position: u16,
     pub width:      u16,
@@ -521,9 +555,9 @@ pub struct Rectangle {
     pub encoding:   Encoding,
 }
 
-impl Message for Rectangle {
-    fn read_from<R: Read>(reader: &mut R) -> Result<Rectangle> {
-        Ok(Rectangle {
+impl Message for RectangleHeader {
+    fn read_from<R: Read>(reader: &mut R) -> Result<RectangleHeader> {
+        Ok(RectangleHeader {
             x_position: try!(reader.read_u16::<BigEndian>()),
             y_position: try!(reader.read_u16::<BigEndian>()),
             width:      try!(reader.read_u16::<BigEndian>()),
@@ -571,7 +605,7 @@ pub enum S2C {
     // core spec
     FramebufferUpdate {
         count:        u16,
-        /* Vec<Rectangle> has to be read out manually */
+        // Vec<RectangleHeader> has to be read out manually
     },
     SetColourMapEntries {
         first_colour: u16,

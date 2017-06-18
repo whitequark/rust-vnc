@@ -77,7 +77,7 @@ impl Event {
                 },
                 protocol::S2C::FramebufferUpdate { count } => {
                     for _ in 0..count {
-                        let rectangle = try!(protocol::Rectangle::read_from(&mut stream));
+                        let rectangle = try!(protocol::RectangleHeader::read_from(&mut stream));
                         debug!("<- {:?}", rectangle);
 
                         let dst = Rect {

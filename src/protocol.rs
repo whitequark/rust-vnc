@@ -330,7 +330,9 @@ pub enum Encoding {
     Zrle,
     Cursor,
     DesktopSize,
+
     // extensions
+    ExtendedKeyEvent,
 }
 
 impl Message for Encoding {
@@ -344,6 +346,7 @@ impl Message for Encoding {
             16   => Ok(Encoding::Zrle),
             -239 => Ok(Encoding::Cursor),
             -223 => Ok(Encoding::DesktopSize),
+            -258 => Ok(Encoding::ExtendedKeyEvent),
             n    => Ok(Encoding::Unknown(n))
         }
     }
@@ -357,6 +360,7 @@ impl Message for Encoding {
             &Encoding::Zrle => 16,
             &Encoding::Cursor => -239,
             &Encoding::DesktopSize => -223,
+            &Encoding::ExtendedKeyEvent => -258,
             &Encoding::Unknown(n) => n
         };
         try!(writer.write_i32::<BigEndian>(encoding));
@@ -386,7 +390,13 @@ pub enum C2S {
         y_position:  u16
     },
     CutText(String),
+
     // extensions
+    ExtendedKeyEvent {
+        down:        bool,
+        keysym:      u32,
+        keycode:     u32,
+    },
 }
 
 impl Message for C2S {
@@ -437,6 +447,18 @@ impl Message for C2S {
                 try!(reader.read_exact(&mut [0u8; 3]));
                 Ok(C2S::CutText(try!(String::read_from(reader))))
             },
+            255 => {
+                let submessage_type = try!(reader.read_u8());
+                match submessage_type {
+                    0 => {
+                        let down = try!(reader.read_u16::<BigEndian>()) != 0;
+                        let keysym = try!(reader.read_u32::<BigEndian>());
+                        let keycode = try!(reader.read_u32::<BigEndian>());
+                        Ok(C2S::ExtendedKeyEvent { down: down, keysym: keysym, keycode: keycode })
+                    }
+                    _ => Err(Error::Unexpected("server to client QEMU submessage type"))
+                }
+            }
             _ => Err(Error::Unexpected("client to server message type"))
         }
     }
@@ -478,13 +500,59 @@ impl Message for C2S {
             &C2S::CutText(ref text) => {
                 try!(String::write_to(text, writer));
             }
+            &C2S::ExtendedKeyEvent { down, keysym, keycode } => {
+                try!(writer.write_u8(255));
+                try!(writer.write_u8(0));
+                try!(writer.write_u16::<BigEndian>(if down { 1 } else { 0 }));
+                try!(writer.write_u32::<BigEndian>(keysym));
+                try!(writer.write_u32::<BigEndian>(keycode));
+            }
         }
         Ok(())
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Rect {
+    pub left:   u16,
+    pub top:    u16,
+    pub width:  u16,
+    pub height: u16
+}
+
+impl Rect {
+    /// Constructs new `Rect`.
+    pub fn new(left: u16, top: u16, width: u16, height: u16) -> Self {
+        Rect {
+            left: left,
+            top: top,
+            width: width,
+            height: height,
+        }
+    }
+}
+
+impl Message for Rect {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Rect> {
+        Ok(Rect {
+            left:   try!(reader.read_u16::<BigEndian>()),
+            top:    try!(reader.read_u16::<BigEndian>()),
+            width:  try!(reader.read_u16::<BigEndian>()),
+            height: try!(reader.read_u16::<BigEndian>()),
+        })
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        try!(writer.write_u16::<BigEndian>(self.left));
+        try!(writer.write_u16::<BigEndian>(self.top));
+        try!(writer.write_u16::<BigEndian>(self.width));
+        try!(writer.write_u16::<BigEndian>(self.height));
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
-pub struct Rectangle {
+pub struct RectangleHeader {
     pub x_position: u16,
     pub y_position: u16,
     pub width:      u16,
@@ -492,9 +560,9 @@ pub struct Rectangle {
     pub encoding:   Encoding,
 }
 
-impl Message for Rectangle {
-    fn read_from<R: Read>(reader: &mut R) -> Result<Rectangle> {
-        Ok(Rectangle {
+impl Message for RectangleHeader {
+    fn read_from<R: Read>(reader: &mut R) -> Result<RectangleHeader> {
+        Ok(RectangleHeader {
             x_position: try!(reader.read_u16::<BigEndian>()),
             y_position: try!(reader.read_u16::<BigEndian>()),
             width:      try!(reader.read_u16::<BigEndian>()),
@@ -542,7 +610,7 @@ pub enum S2C {
     // core spec
     FramebufferUpdate {
         count:        u16,
-        /* Vec<Rectangle> has to be read out manually */
+        // Vec<RectangleHeader> has to be read out manually
     },
     SetColourMapEntries {
         first_colour: u16,

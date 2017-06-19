@@ -14,17 +14,43 @@ mod security;
 
 pub mod client;
 pub mod proxy;
+pub mod server;
 
 pub use protocol::{PixelFormat, Colour, Encoding};
 pub use client::Client;
 pub use proxy::Proxy;
+pub use server::Server;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Rect {
-    pub left:   u16,
-    pub top:    u16,
-    pub width:  u16,
-    pub height: u16
+pub mod pixel_format {
+    use super::PixelFormat;
+
+    /// RGB pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub const RGB8888: PixelFormat = PixelFormat {
+        bits_per_pixel: 32,
+        depth: 24,
+        big_endian: true,
+        true_colour: true,
+        red_max: 255,
+        green_max: 255,
+        blue_max: 255,
+        red_shift: 0,
+        green_shift: 8,
+        blue_shift: 16,
+    };
+
+    /// BGR pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub const BGR8888: PixelFormat = PixelFormat {
+        bits_per_pixel: 32,
+        depth: 24,
+        big_endian: true,
+        true_colour: true,
+        red_max: 255,
+        green_max: 255,
+        blue_max: 255,
+        red_shift: 16,
+        green_shift: 8,
+        blue_shift: 0,
+    };
 }
 
 #[derive(Debug)]

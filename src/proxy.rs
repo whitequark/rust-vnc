@@ -177,9 +177,9 @@ impl Proxy {
                 match message {
                     protocol::S2C::FramebufferUpdate { count } => {
                         for _ in 0..count {
-                            let rectangle = try!(protocol::Rectangle::read_from(server_stream));
+                            let rectangle = try!(protocol::RectangleHeader::read_from(server_stream));
                             debug!("c<-s {:?}", rectangle);
-                            try!(protocol::Rectangle::write_to(&rectangle, &mut buffer_stream));
+                            try!(protocol::RectangleHeader::write_to(&rectangle, &mut buffer_stream));
 
                             match rectangle.encoding {
                                 protocol::Encoding::Raw => {

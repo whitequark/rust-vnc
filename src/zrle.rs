@@ -2,7 +2,7 @@ use std;
 use std::io::Read;
 use flate2;
 use byteorder::ReadBytesExt;
-use ::{protocol, Error, Result, Rect};
+use ::{protocol, Error, Result};
 
 struct ZlibReader<'a> {
     decompressor: flate2::Decompress,
@@ -111,9 +111,9 @@ impl Decoder {
         Decoder { decompressor: Some(flate2::Decompress::new(/*zlib_header*/true)) }
     }
 
-    pub fn decode<F>(&mut self, format: protocol::PixelFormat, rect: Rect,
+    pub fn decode<F>(&mut self, format: protocol::PixelFormat, rect: protocol::Rect,
                  input: &[u8], mut callback: F) -> Result<bool>
-            where F: FnMut(Rect, Vec<u8>) -> Result<bool> {
+            where F: FnMut(protocol::Rect, Vec<u8>) -> Result<bool> {
         fn read_run_length(reader: &mut Read) -> Result<usize> {
             let mut run_length_part = try!(reader.read_u8());
             let mut run_length = 1 + run_length_part as usize;
@@ -235,8 +235,7 @@ impl Decoder {
                     _ => return Err(Error::Unexpected("ZRLE subencoding"))
                 }
 
-                let tile = Rect { top: rect.top + y, left: rect.left + x,
-                                  width: width, height: height };
+                let tile = protocol::Rect::new(rect.top + y, rect.left + x, width, height);
                 if let false = try!(callback(tile, pixels)) {
                     return Ok(false)
                 }

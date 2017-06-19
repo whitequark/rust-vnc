@@ -4,7 +4,7 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use byteorder::{BigEndian, ReadBytesExt};
-use ::{zrle, protocol, Rect, Colour, Error, Result};
+use ::{zrle, protocol, Colour, Error, Result};
 use protocol::Message;
 use security::des;
 #[cfg(feature = "apple-auth")]
@@ -35,8 +35,8 @@ pub enum Event {
     Disconnected(Option<Error>),
     Resize(u16, u16),
     SetColourMap { first_colour: u16, colours: Vec<Colour> },
-    PutPixels(Rect, Vec<u8>),
-    CopyPixels { src: Rect, dst: Rect },
+    PutPixels(protocol::Rect, Vec<u8>),
+    CopyPixels { src: protocol::Rect, dst: protocol::Rect },
     EndOfFrame,
     SetCursor { size: (u16, u16), hotspot: (u16, u16), pixels: Vec<u8>, mask_bits: Vec<u8> },
     Clipboard(String),
@@ -77,15 +77,13 @@ impl Event {
                 },
                 protocol::S2C::FramebufferUpdate { count } => {
                     for _ in 0..count {
-                        let rectangle = try!(protocol::Rectangle::read_from(&mut stream));
+                        let rectangle = try!(protocol::RectangleHeader::read_from(&mut stream));
                         debug!("<- {:?}", rectangle);
 
-                        let dst = Rect {
-                            left:   rectangle.x_position,
-                            top:    rectangle.y_position,
-                            width:  rectangle.width,
-                            height: rectangle.height
-                        };
+                        let dst = protocol::Rect::new(rectangle.x_position,
+                                                      rectangle.y_position,
+                                                      rectangle.width,
+                                                      rectangle.height);
                         match rectangle.encoding {
                             protocol::Encoding::Raw => {
                                 let length = (rectangle.width as usize) *
@@ -99,12 +97,10 @@ impl Event {
                             },
                             protocol::Encoding::CopyRect => {
                                 let copy_rect = try!(protocol::CopyRect::read_from(&mut stream));
-                                let src = Rect {
-                                    left:   copy_rect.src_x_position,
-                                    top:    copy_rect.src_y_position,
-                                    width:  rectangle.width,
-                                    height: rectangle.height
-                                };
+                                let src = protocol::Rect::new(copy_rect.src_x_position,
+                                                              copy_rect.src_y_position,
+                                                              rectangle.width,
+                                                              rectangle.height);
                                 send!(tx_events, Event::CopyPixels { src: src, dst: dst })
                             },
                             protocol::Encoding::Zrle => {
@@ -321,7 +317,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
+    pub fn request_update(&mut self, rect: protocol::Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {
             incremental: incremental,
             x_position:  rect.left,
@@ -371,7 +367,7 @@ impl Client {
         // are no FramebufferUpdate's in the buffers somewhere.
         // This is not fully robust though (and cannot possibly be).
         let _ = self.poll_iter().count(); // drain it
-        let framebuffer_rect = Rect { left: 0, top: 0, width: self.size.0, height: self.size.1 };
+        let framebuffer_rect = protocol::Rect::new(0, 0, self.size.0, self.size.1);
         try!(self.request_update(framebuffer_rect, false));
         'outer: loop {
             for event in self.poll_iter() {

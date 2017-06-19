@@ -8,9 +8,6 @@ extern crate octavo;
 #[cfg(feature = "apple-auth")]
 extern crate crypto;
 
-use std::io::Write;
-use byteorder::{BigEndian, WriteBytesExt};
-
 mod protocol;
 mod zrle;
 mod security;
@@ -24,43 +21,36 @@ pub use client::Client;
 pub use proxy::Proxy;
 pub use server::Server;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Rect {
-    pub left:   u16,
-    pub top:    u16,
-    pub width:  u16,
-    pub height: u16
-}
+pub mod pixel_format {
+    use super::PixelFormat;
 
-impl Rect {
-    /// Constructs new `Rect`.
-    pub fn new(left: u16, top: u16, width: u16, height: u16) -> Self {
-        Rect {
-            left: left,
-            top: top,
-            width: width,
-            height: height,
-        }
-    }
+    /// RGB pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub const RGB8888: PixelFormat = PixelFormat {
+        bits_per_pixel: 32,
+        depth: 24,
+        big_endian: true,
+        true_colour: true,
+        red_max: 255,
+        green_max: 255,
+        blue_max: 255,
+        red_shift: 0,
+        green_shift: 8,
+        blue_shift: 16,
+    };
 
-    /// Constructs new zero-sized `Rect` placed at (0, 0).
-    pub fn new_empty() -> Self {
-        Rect {
-            left: 0,
-            top: 0,
-            width: 0,
-            height: 0,
-        }
-    }
-
-    /// Writes `Rect` to given stream.
-    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u16::<BigEndian>(self.left));
-        try!(writer.write_u16::<BigEndian>(self.top));
-        try!(writer.write_u16::<BigEndian>(self.width));
-        try!(writer.write_u16::<BigEndian>(self.height));
-        Ok(())
-    }
+    /// BGR pixel format with 4 bytes per pixel and 3 bytes of depth.
+    pub const BGR8888: PixelFormat = PixelFormat {
+        bits_per_pixel: 32,
+        depth: 24,
+        big_endian: true,
+        true_colour: true,
+        red_max: 255,
+        green_max: 255,
+        blue_max: 255,
+        red_shift: 16,
+        green_shift: 8,
+        blue_shift: 0,
+    };
 }
 
 #[derive(Debug)]

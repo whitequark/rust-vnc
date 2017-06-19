@@ -237,40 +237,6 @@ pub struct PixelFormat {
     pub blue_shift:     u8,
 }
 
-impl PixelFormat {
-    /// Creates RGB pixel format with 4 bytes per pixel and 3 bytes of depth.
-    pub fn new_rgb8888() -> Self {
-        PixelFormat {
-            bits_per_pixel: 32,
-            depth: 24,
-            big_endian: true,
-            true_colour: true,
-            red_max: 255,
-            green_max: 255,
-            blue_max: 255,
-            red_shift: 0,
-            green_shift: 8,
-            blue_shift: 16,
-        }
-    }
-
-    /// Creates BGR pixel format with 4 bytes per pixel and 3 bytes of depth.
-    pub fn new_bgr8888() -> Self {
-        PixelFormat {
-            bits_per_pixel: 32,
-            depth: 24,
-            big_endian: true,
-            true_colour: true,
-            red_max: 255,
-            green_max: 255,
-            blue_max: 255,
-            red_shift: 16,
-            green_shift: 8,
-            blue_shift: 0,
-        }
-    }
-}
-
 impl Message for PixelFormat {
     fn read_from<R: Read>(reader: &mut R) -> Result<PixelFormat> {
         let pixel_format = PixelFormat {
@@ -542,6 +508,45 @@ impl Message for C2S {
                 try!(writer.write_u32::<BigEndian>(keycode));
             }
         }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Rect {
+    pub left:   u16,
+    pub top:    u16,
+    pub width:  u16,
+    pub height: u16
+}
+
+impl Rect {
+    /// Constructs new `Rect`.
+    pub fn new(left: u16, top: u16, width: u16, height: u16) -> Self {
+        Rect {
+            left: left,
+            top: top,
+            width: width,
+            height: height,
+        }
+    }
+}
+
+impl Message for Rect {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Rect> {
+        Ok(Rect {
+            left:   try!(reader.read_u16::<BigEndian>()),
+            top:    try!(reader.read_u16::<BigEndian>()),
+            width:  try!(reader.read_u16::<BigEndian>()),
+            height: try!(reader.read_u16::<BigEndian>()),
+        })
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        try!(writer.write_u16::<BigEndian>(self.left));
+        try!(writer.write_u16::<BigEndian>(self.top));
+        try!(writer.write_u16::<BigEndian>(self.width));
+        try!(writer.write_u16::<BigEndian>(self.height));
         Ok(())
     }
 }

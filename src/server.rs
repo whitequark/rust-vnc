@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::net::{TcpStream, Shutdown};
 use byteorder::{BigEndian, WriteBytesExt};
-use ::{protocol, Rect, Result};
+use ::{protocol, Result};
 use protocol::Message;
 
 /// Definitions of events received by server from client.
@@ -47,7 +47,7 @@ pub enum Event {
     /// `FramebufferUpdate`.
     FramebufferUpdateRequest {
         incremental: bool,
-        rect: Rect,
+        rect: protocol::Rect,
     },
 
     /// A `KeyEvent` message indicates a key press or release. `down` flag is `true` if the key is
@@ -103,16 +103,16 @@ pub enum Event {
 #[derive(Debug)]
 enum Update<'a> {
     Raw {
-        rect: Rect,
+        rect: protocol::Rect,
         pixel_data: &'a [u8],
     },
     CopyRect {
-        dst: Rect,
+        dst: protocol::Rect,
         src_x_position: u16,
         src_y_position: u16,
     },
     Zrle {
-        rect: Rect,
+        rect: protocol::Rect,
         zlib_data: &'a [u8],
     },
     SetCursor {
@@ -216,7 +216,7 @@ impl<'a> Update<'a> {
                 try!(protocol::Encoding::DesktopSize.write_to(writer));
             }
             Update::Encoding { encoding } => {
-                try!(Rect::new_empty().write_to(writer));
+                try!(protocol::Rect::new(0, 0, 0, 0).write_to(writer));
                 try!(encoding.write_to(writer));
             }
         }
@@ -225,32 +225,39 @@ impl<'a> Update<'a> {
 }
 
 /// Builder of `FramebufferUpdate` message.
-pub struct FramebufferUpdate<'a> {
+///
+/// This structure can be constructed with `Server::create_update`.
+pub struct FramebufferUpdateBuilder<'a, 'b> {
     updates: Vec<Update<'a>>,
+    validation_data: &'b ValidationData,
 }
 
-impl<'a> FramebufferUpdate<'a> {
-    /// Constructs new `FramebufferUpdate`.
-    pub fn new() -> Self {
-        FramebufferUpdate {
+impl<'a, 'b> FramebufferUpdateBuilder<'a, 'b> {
+    /// Constructs new `FramebufferUpdateBuilder`.
+    fn new(validation_data: &'b ValidationData) -> Self {
+        FramebufferUpdateBuilder {
             updates: Vec::new(),
+            validation_data: validation_data,
         }
     }
 
     /// Adds raw pixel data.
-    pub fn add_raw_pixels(&mut self, rect: Rect, pixel_data: &'a [u8]) -> &mut Self {
+    ///
+    /// Panics if length of pixel data does not match rectangle size.
+    pub fn add_raw_pixels(&mut self, rect: protocol::Rect, pixel_data: &'a [u8]) -> &mut Self {
         let update = Update::Raw {
             rect: rect,
             pixel_data: pixel_data
         };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
 
     /// Adds `CopyRect` update message instructing client to reuse pixel data it already owns.
     pub fn add_copy_rect(&mut self,
-                         dst: Rect,
+                         dst: protocol::Rect,
                          src_x_position: u16,
                          src_y_position: u16)
                          -> &mut Self {
@@ -260,24 +267,30 @@ impl<'a> FramebufferUpdate<'a> {
             src_y_position: src_y_position,
         };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
 
     /// Adds compressed pixel data.
     ///
+    /// Panics if length of compressed data is bigger than `u32::MAX`.
+    ///
     /// TODO: add method taking uncompressed data and compressing them.
-    pub fn add_compressed_pixels(&mut self, rect: Rect, zlib_data: &'a [u8]) -> &mut Self {
+    pub fn add_compressed_pixels(&mut self, rect: protocol::Rect, zlib_data: &'a [u8]) -> &mut Self {
         let update = Update::Zrle {
             rect: rect,
             zlib_data: zlib_data
         };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
 
-    /// Add data for drawing cursor.
+    /// Adds data for drawing cursor.
+    ///
+    /// Panics if pixel data or mask bits length does not match size of the cursor.
     pub fn add_cursor(&mut self,
                       width: u16,
                       height: u16,
@@ -293,6 +306,7 @@ impl<'a> FramebufferUpdate<'a> {
             mask_bits: mask_bits
         };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
@@ -304,6 +318,7 @@ impl<'a> FramebufferUpdate<'a> {
             height: height,
         };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
@@ -312,27 +327,33 @@ impl<'a> FramebufferUpdate<'a> {
     pub fn add_pseudo_encoding(&mut self, encoding: protocol::Encoding) -> &mut Self {
         let update = Update::Encoding { encoding: encoding };
 
+        update.check(self.validation_data);
         self.updates.push(update);
         self
     }
 
-    /// Checks if all updates are valid.
-    ///
-    /// Panics if any of the updates is not valid.
-    fn check(&self, validation_data: &ValidationData) {
-        for update in self.updates.iter() {
-            update.check(validation_data);
-        }
+    /// Consumes `FramebufferUpdateBuilder` and returns `FramebufferUpdate`.
+    pub fn done(self) -> FramebufferUpdate<'a> {
+        FramebufferUpdate { updates: self.updates }
     }
+}
 
+/// Represents `FramebufferUpdate` message.
+///
+/// Use `FramebufferUpdateBuilder` to construct this struct.
+pub struct FramebufferUpdate<'a> {
+    updates: Vec<Update<'a>>,
+}
+
+impl<'a> FramebufferUpdate<'a> {
     /// Serializes this structure and sends it using given `writer`.
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         for chunk in self.updates.chunks(u16::max_value() as usize) {
             let count = chunk.len() as u16;
-             try!(protocol::S2C::FramebufferUpdate{count}.write_to(writer));
-             for update in chunk {
+            try!(protocol::S2C::FramebufferUpdate{count}.write_to(writer));
+            for update in chunk {
                 try!(update.write_to(writer));
-             }
+            }
         }
         Ok(())
     }
@@ -417,6 +438,12 @@ impl Server {
         }, client_init.shared))
     }
 
+    /// Constructs new `FramebufferUpdateBuilder` structure used to build `FramebufferUpdate`
+    /// message.
+    pub fn create_update<'a, 'b>(&'b self) -> FramebufferUpdateBuilder<'a, 'b> {
+        FramebufferUpdateBuilder::new(&self.validation_data)
+    }
+
     /// Reads the socket and returns received event.
     pub fn read_event(&mut self) -> Result<Event> {
         match protocol::C2S::read_from(&mut self.stream) {
@@ -440,7 +467,7 @@ impl Server {
                     } => {
                         Ok(Event::FramebufferUpdateRequest {
                             incremental,
-                            rect: Rect::new(x_position, y_position, width, height),
+                            rect: protocol::Rect::new(x_position, y_position, width, height),
                         })
                     }
                     protocol::C2S::KeyEvent { down, key } => {
@@ -462,11 +489,7 @@ impl Server {
     }
 
     /// Sends `FramebufferUpdate` message.
-    ///
-    /// Panics if given updates are not valid. All validity checks are done before sending any
-    /// update.
     pub fn send_update(&mut self, updates: &FramebufferUpdate) -> Result<()> {
-        updates.check(&self.validation_data);
         try!(updates.write_to(&mut self.stream));
         Ok(())
     }
@@ -480,13 +503,13 @@ impl Server {
 
 #[cfg(test)]
 mod test {
-    use super::{protocol, Rect, Update, ValidationData};
+    use super::{protocol, Update, ValidationData};
 
     /// Checks if `ValidationData` correctly converts bits per pixel from `PixelFormat` to bytes
     /// per pixel.
     #[test]
     fn check_if_validation_data_correctly_rounds_bits_to_bytes() {
-        let mut format = protocol::PixelFormat::new_rgb8888();
+        let mut format = ::pixel_format::BGR8888;
         let test_data = vec![(8, 1), (23, 3), (24, 3), (25, 4), (31, 4), (32, 4), (33, 5)];
         for (bits, expected_bytes) in test_data {
             format.bits_per_pixel = bits;
@@ -500,18 +523,18 @@ mod test {
     #[test]
     fn check_if_raw_update_accepts_valid_data() {
         let data = vec![0; 4 * 800 * 100];
-        let pixel_format = protocol::PixelFormat::new_rgb8888();
+        let pixel_format = ::pixel_format::BGR8888;
         let validation_data = ValidationData::new(&pixel_format);
 
         // Small rectangle
         Update::Raw {
-            rect: Rect::new(0, 0, 8, 8),
+            rect: protocol::Rect::new(0, 0, 8, 8),
             pixel_data: &data[0 .. (4 * 8 * 8)],
         }.check(&validation_data);
 
         // Big rectangle (bigger than `u16::MAX`)
         Update::Raw {
-            rect: Rect::new(0, 0, 800, 100),
+            rect: protocol::Rect::new(0, 0, 800, 100),
             pixel_data: &data,
         }.check(&validation_data);
     }
@@ -521,11 +544,11 @@ mod test {
     #[should_panic]
     fn check_if_raw_update_rejects_invalid_data() {
         let data = vec![0; 5];
-        let pixel_format = protocol::PixelFormat::new_rgb8888();
+        let pixel_format = ::pixel_format::BGR8888;
         let validation_data = ValidationData::new(&pixel_format);
 
         Update::Raw {
-            rect: Rect::new(0, 0, 8, 8),
+            rect: protocol::Rect::new(0, 0, 8, 8),
             pixel_data: &data,
         }.check(&validation_data);
     }
@@ -535,7 +558,7 @@ mod test {
     #[test]
     fn check_if_set_cursor_update_accepts_valid_data() {
         let data = vec![0; 4 * 800 * 100];
-        let pixel_format = protocol::PixelFormat::new_rgb8888();
+        let pixel_format = ::pixel_format::BGR8888;
         let validation_data = ValidationData::new(&pixel_format);
 
         // Small rectangle
@@ -560,7 +583,7 @@ mod test {
     #[should_panic]
     fn check_if_set_cursor_update_rejects_invalid_pixel_data() {
         let data = vec![0; 15];
-        let pixel_format = protocol::PixelFormat::new_rgb8888();
+        let pixel_format = ::pixel_format::BGR8888;
         let validation_data = ValidationData::new(&pixel_format);
 
         Update::SetCursor {
@@ -576,7 +599,7 @@ mod test {
     #[should_panic]
     fn check_if_set_cursor_update_rejects_invalid_bit_mask_data() {
         let data = vec![0; 16];
-        let pixel_format = protocol::PixelFormat::new_rgb8888();
+        let pixel_format = ::pixel_format::BGR8888;
         let validation_data = ValidationData::new(&pixel_format);
 
         Update::SetCursor {

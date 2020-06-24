@@ -1,13 +1,6 @@
-extern crate env_logger;
-#[macro_use] extern crate log;
-#[macro_use] extern crate clap;
-extern crate vnc;
-extern crate sdl2;
-extern crate x11;
-extern crate byteorder;
-
+use log::{info, error, debug, warn};
 use std::io::{Result as IoResult, ErrorKind as IoErrorKind, Read, Write, Cursor};
-use clap::{Arg, App};
+use clap::{Arg, App, value_t};
 use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum as SdlPixelFormat};
 use sdl2::rect::Rect as SdlRect;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
@@ -55,14 +48,14 @@ fn pixel_format_vnc_to_sdl(vnc_format: vnc::PixelFormat) -> Option<SdlPixelForma
     for format in &FORMAT_MAP {
         if format.1 == vnc_format { return Some(format.0) }
     }
-    return None
+    None
 }
 
 fn pixel_format_sdl_to_vnc(sdl_format: SdlPixelFormat) -> Option<vnc::PixelFormat> {
     for format in &FORMAT_MAP {
         if format.0 == sdl_format { return Some(format.1) }
     }
-    return None
+    None
 }
 
 fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels: Vec<u8>) ->
@@ -93,7 +86,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
 
     fn read_color<R: Read>(reader: &mut R, size: usize, masks: &PixelMasks) ->
             IoResult<Color> {
-        let packed = try!(reader.read_uint::<NativeEndian>(size));
+        let packed = reader.read_uint::<NativeEndian>(size)?;
         Ok(Color::RGB(
             ((packed as u32 & masks.rmask) >> masks.rmask.trailing_zeros()) as u8,
             ((packed as u32 & masks.gmask) >> masks.gmask.trailing_zeros()) as u8,
@@ -135,7 +128,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let matches = App::new("rvncclient")
         .about("VNC client")
@@ -193,9 +186,9 @@ fn main() {
             debug!("available authentication methods: {:?}", methods);
             for method in methods {
                 match method {
-                    &vnc::client::AuthMethod::None =>
+                    vnc::client::AuthMethod::None =>
                         return Some(vnc::client::AuthChoice::None),
-                    &vnc::client::AuthMethod::Password => {
+                    vnc::client::AuthMethod::Password => {
                         return match password {
                             None => None,
                             Some(ref password) => {
@@ -208,7 +201,7 @@ fn main() {
                             }
                         }
                     },
-                    &vnc::client::AuthMethod::AppleRemoteDesktop =>
+                    vnc::client::AuthMethod::AppleRemoteDesktop =>
                         match (username, password) {
                             (Some(username), Some(password)) =>
                                 return Some(vnc::client::AuthChoice::AppleRemoteDesktop(
@@ -276,7 +269,7 @@ fn main() {
     let mut key_ctrl = false;
 
     renderer.clear();
-    vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+    vnc.request_update(vnc::Rect { left: 0, top: 0, width, height },
                        false).unwrap();
 
     let mut incremental = true;
@@ -314,7 +307,7 @@ fn main() {
                         sdl_format.byte_size_of_pixels(vnc_rect.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_rect), Some(sdl_rect));
                     incremental |= vnc_rect == vnc::Rect { left: 0, top: 0,
-                                                           width: width, height: height };
+                                                           width, height };
                 },
                 Event::CopyPixels { src: vnc_src, dst: vnc_dst } => {
                     let sdl_src = SdlRect::new_unwrap(
@@ -500,7 +493,7 @@ fn main() {
             vnc.poke_qemu().unwrap();
             qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
         } else {
-            vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+            vnc.request_update(vnc::Rect { left: 0, top: 0, width, height},
                                incremental).unwrap();
 
         }

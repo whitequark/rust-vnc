@@ -1,8 +1,8 @@
 use std::io::{Read, Write, Cursor};
 use std::net::{TcpStream, Shutdown};
 use std::thread;
-use ::{Error, Result};
-use protocol::{self, Message};
+use crate::{Error, Result};
+use crate::protocol::{self, Message};
 
 pub struct Proxy {
     c2s_thread: thread::JoinHandle<Result<()>>,
@@ -12,13 +12,13 @@ pub struct Proxy {
 impl Proxy {
     pub fn from_tcp_streams(mut server_stream: TcpStream, mut client_stream: TcpStream) ->
             Result<Proxy> {
-        let server_version = try!(protocol::Version::read_from(&mut server_stream));
+        let server_version = protocol::Version::read_from(&mut server_stream)?;
         debug!("c<-s {:?}", server_version);
-        try!(protocol::Version::write_to(&server_version, &mut client_stream));
+        protocol::Version::write_to(&server_version, &mut client_stream)?;
 
-        let client_version = try!(protocol::Version::read_from(&mut client_stream));
+        let client_version = protocol::Version::read_from(&mut client_stream)?;
         debug!("c->s {:?}", client_version);
-        try!(protocol::Version::write_to(&client_version, &mut server_stream));
+        protocol::Version::write_to(&client_version, &mut server_stream)?;
 
         fn security_type_supported(security_type: &protocol::SecurityType) -> bool {
             match security_type {
@@ -32,7 +32,7 @@ impl Proxy {
 
         let security_types = match client_version {
             protocol::Version::Rfb33 => {
-                let mut security_type = try!(protocol::SecurityType::read_from(&mut server_stream));
+                let mut security_type = protocol::SecurityType::read_from(&mut server_stream)?;
                 debug!("!<-s SecurityType::{:?}", security_type);
 
                 // Filter out security types we can't handle
@@ -41,7 +41,7 @@ impl Proxy {
                 }
 
                 debug!("c<-! SecurityType::{:?}", security_type);
-                try!(protocol::SecurityType::write_to(&security_type, &mut client_stream));
+                protocol::SecurityType::write_to(&security_type, &mut client_stream)?;
 
                 if security_type == protocol::SecurityType::Invalid {
                     vec![]
@@ -51,23 +51,23 @@ impl Proxy {
             },
             _ => {
                 let mut security_types =
-                    try!(protocol::SecurityTypes::read_from(&mut server_stream));
+                    protocol::SecurityTypes::read_from(&mut server_stream)?;
                 debug!("!<-s {:?}", security_types);
 
                 // Filter out security types we can't handle
                 security_types.0.retain(security_type_supported);
 
                 debug!("c<-! {:?}", security_types);
-                try!(protocol::SecurityTypes::write_to(&security_types, &mut client_stream));
+                protocol::SecurityTypes::write_to(&security_types, &mut client_stream)?;
 
                 security_types.0
             }
         };
 
-        if security_types.len() == 0 {
-            let reason = try!(String::read_from(&mut server_stream));
+        if security_types.is_empty() {
+            let reason = String::read_from(&mut server_stream)?;
             debug!("c<-s {:?}", reason);
-            try!(String::write_to(&reason, &mut client_stream));
+            String::write_to(&reason, &mut client_stream)?;
 
             return Err(Error::Server(reason))
         }
@@ -76,9 +76,9 @@ impl Proxy {
             protocol::Version::Rfb33 => security_types[0],
             _ => {
                 let used_security_type =
-                    try!(protocol::SecurityType::read_from(&mut client_stream));
+                    protocol::SecurityType::read_from(&mut client_stream)?;
                 debug!("c->s SecurityType::{:?}", used_security_type);
-                try!(protocol::SecurityType::write_to(&used_security_type, &mut server_stream));
+                protocol::SecurityType::write_to(&used_security_type, &mut server_stream)?;
 
                 used_security_type
             }
@@ -93,31 +93,31 @@ impl Proxy {
         }
 
         if !skip_security_result {
-            let security_result = try!(protocol::SecurityResult::read_from(&mut server_stream));
+            let security_result = protocol::SecurityResult::read_from(&mut server_stream)?;
             debug!("c<-s SecurityResult::{:?}", security_result);
-            try!(protocol::SecurityResult::write_to(&security_result, &mut client_stream));
+            protocol::SecurityResult::write_to(&security_result, &mut client_stream)?;
 
             if security_result == protocol::SecurityResult::Failed {
                 match client_version {
                     protocol::Version::Rfb33 | protocol::Version::Rfb37 =>
                         return Err(Error::AuthenticationFailure(String::from(""))),
                     protocol::Version::Rfb38 => {
-                        let reason = try!(String::read_from(&mut server_stream));
+                        let reason = String::read_from(&mut server_stream)?;
                         debug!("c<-s {:?}", reason);
-                        try!(String::write_to(&reason, &mut client_stream));
+                        String::write_to(&reason, &mut client_stream)?;
                         return Err(Error::AuthenticationFailure(reason))
                     }
                 }
             }
         }
 
-        let client_init = try!(protocol::ClientInit::read_from(&mut client_stream));
+        let client_init = protocol::ClientInit::read_from(&mut client_stream)?;
         debug!("c->s {:?}", client_init);
-        try!(protocol::ClientInit::write_to(&client_init, &mut server_stream));
+        protocol::ClientInit::write_to(&client_init, &mut server_stream)?;
 
-        let server_init = try!(protocol::ServerInit::read_from(&mut server_stream));
+        let server_init = protocol::ServerInit::read_from(&mut server_stream)?;
         debug!("c<-s {:?}", server_init);
-        try!(protocol::ServerInit::write_to(&server_init, &mut client_stream));
+        protocol::ServerInit::write_to(&server_init, &mut client_stream)?;
 
         let (mut c2s_server_stream, mut c2s_client_stream) =
             (server_stream.try_clone().unwrap(), client_stream.try_clone().unwrap());
@@ -141,7 +141,7 @@ impl Proxy {
             }
 
             loop {
-                let mut message = try!(protocol::C2S::read_from(client_stream));
+                let mut message = protocol::C2S::read_from(client_stream)?;
                 match message {
                     protocol::C2S::SetEncodings(ref mut encodings) => {
                         debug!("c->! SetEncodings({:?})", encodings);
@@ -159,7 +159,7 @@ impl Proxy {
                     },
                     ref message => debug!("c->s {:?}", message)
                 }
-                try!(protocol::C2S::write_to(&message, server_stream))
+                protocol::C2S::write_to(&message, server_stream)?
             }
         }
 
@@ -170,48 +170,48 @@ impl Proxy {
             loop {
                 let mut buffer_stream = Cursor::new(Vec::new());
 
-                let message = try!(protocol::S2C::read_from(server_stream));
+                let message = protocol::S2C::read_from(server_stream)?;
                 debug!("c<-s {:?}", message);
-                try!(protocol::S2C::write_to(&message, &mut buffer_stream));
+                protocol::S2C::write_to(&message, &mut buffer_stream)?;
 
                 match message {
                     protocol::S2C::FramebufferUpdate { count } => {
                         for _ in 0..count {
-                            let rectangle = try!(protocol::Rectangle::read_from(server_stream));
+                            let rectangle = protocol::Rectangle::read_from(server_stream)?;
                             debug!("c<-s {:?}", rectangle);
-                            try!(protocol::Rectangle::write_to(&rectangle, &mut buffer_stream));
+                            protocol::Rectangle::write_to(&rectangle, &mut buffer_stream)?;
 
                             match rectangle.encoding {
                                 protocol::Encoding::Raw => {
                                     let mut pixels = vec![0; (rectangle.width as usize) *
                                                              (rectangle.height as usize) *
                                                              (format.bits_per_pixel as usize / 8)];
-                                    try!(server_stream.read_exact(&mut pixels));
+                                    server_stream.read_exact(&mut pixels)?;
                                     debug!("c<-s ...raw pixels");
-                                    try!(buffer_stream.write_all(&pixels));
+                                    buffer_stream.write_all(&pixels)?;
                                 },
                                 protocol::Encoding::CopyRect => {
                                     let copy_rect =
-                                        try!(protocol::CopyRect::read_from(server_stream));
+                                        protocol::CopyRect::read_from(server_stream)?;
                                     debug!("c<-s {:?}", copy_rect);
-                                    try!(protocol::CopyRect::write_to(&copy_rect,
-                                                                      &mut buffer_stream));
+                                    protocol::CopyRect::write_to(&copy_rect,
+                                                                      &mut buffer_stream)?;
                                 },
                                 protocol::Encoding::Zrle => {
-                                    let zrle = try!(Vec::<u8>::read_from(server_stream));
+                                    let zrle = Vec::<u8>::read_from(server_stream)?;
                                     debug!("c<-s ...ZRLE pixels");
-                                    try!(Vec::<u8>::write_to(&zrle, &mut buffer_stream));
+                                    Vec::<u8>::write_to(&zrle, &mut buffer_stream)?;
                                 }
                                 protocol::Encoding::Cursor => {
                                     let mut pixels    = vec![0; (rectangle.width as usize) *
                                                                 (rectangle.height as usize) *
                                                                 (format.bits_per_pixel as usize / 8)];
-                                    try!(server_stream.read_exact(&mut pixels));
-                                    try!(buffer_stream.write_all(&pixels));
+                                    server_stream.read_exact(&mut pixels)?;
+                                    buffer_stream.write_all(&pixels)?;
                                     let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
                                                                 (rectangle.height as usize)];
-                                    try!(server_stream.read_exact(&mut mask_bits));
-                                    try!(buffer_stream.write_all(&mask_bits));
+                                    server_stream.read_exact(&mut mask_bits)?;
+                                    buffer_stream.write_all(&mask_bits)?;
                                 },
                                 protocol::Encoding::DesktopSize => (),
                                 _ => return Err(Error::Unexpected("encoding"))
@@ -222,7 +222,7 @@ impl Proxy {
                 }
 
                 let buffer = buffer_stream.into_inner();
-                try!(client_stream.write_all(&buffer));
+                client_stream.write_all(&buffer)?;
             }
         }
 

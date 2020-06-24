@@ -1,8 +1,6 @@
-use std;
 use std::io::Read;
-use flate2;
 use byteorder::ReadBytesExt;
-use ::{protocol, Error, Result, Rect};
+use crate::{protocol, Error, Result, Rect};
 
 struct ZlibReader<'a> {
     decompressor: flate2::Decompress,
@@ -11,11 +9,11 @@ struct ZlibReader<'a> {
 
 impl<'a> ZlibReader<'a> {
     fn new(decompressor: flate2::Decompress, input: &'a [u8]) -> ZlibReader<'a> {
-        ZlibReader { decompressor: decompressor, input: input }
+        ZlibReader { decompressor, input }
     }
 
     fn into_inner(self) -> Result<flate2::Decompress> {
-        if self.input.len() == 0 {
+        if self.input.is_empty() {
             Ok(self.decompressor)
         } else {
             Err(Error::Unexpected("leftover ZRLE byte data"))
@@ -51,7 +49,7 @@ struct BitReader<T: Read> {
 
 impl<T: Read> BitReader<T> {
     fn new(reader: T) -> BitReader<T> {
-        BitReader { reader: reader, buffer: 0, position: 8 }
+        BitReader { reader, buffer: 0, position: 8 }
     }
 
     fn into_inner(self) -> Result<T> {
@@ -66,7 +64,7 @@ impl<T: Read> BitReader<T> {
         assert!(count > 0 && count <= 8);
 
         if self.position == 8 {
-            self.buffer = try!(self.reader.read_u8());
+            self.buffer = self.reader.read_u8()?;
             self.position = 0;
         }
 
@@ -83,7 +81,7 @@ impl<T: Read> BitReader<T> {
     }
 
     fn read_bit(&mut self) -> std::io::Result<bool> {
-        Ok(try!(self.read_bits(1)) != 0)
+        Ok(self.read_bits(1)? != 0)
     }
 
     fn align(&mut self) {
@@ -114,20 +112,20 @@ impl Decoder {
     pub fn decode<F>(&mut self, format: protocol::PixelFormat, rect: Rect,
                  input: &[u8], mut callback: F) -> Result<bool>
             where F: FnMut(Rect, Vec<u8>) -> Result<bool> {
-        fn read_run_length(reader: &mut Read) -> Result<usize> {
-            let mut run_length_part = try!(reader.read_u8());
+        fn read_run_length(reader: &mut dyn Read) -> Result<usize> {
+            let mut run_length_part = reader.read_u8()?;
             let mut run_length = 1 + run_length_part as usize;
             while run_length_part == 255 {
-                run_length_part = try!(reader.read_u8());
+                run_length_part = reader.read_u8()?;
                 run_length += run_length_part as usize;
             }
             Ok(run_length)
         }
 
-        fn copy_true_color(reader: &mut Read, pixels: &mut Vec<u8>,
+        fn copy_true_color(reader: &mut dyn Read, pixels: &mut Vec<u8>,
                            pad: bool, compressed_bpp: usize, bpp: usize) -> Result<()> {
             let mut buf = [0; 4];
-            try!(reader.read_exact(&mut buf[pad as usize..pad as usize + compressed_bpp]));
+            reader.read_exact(&mut buf[pad as usize..pad as usize + compressed_bpp])?;
             pixels.extend_from_slice(&buf[..bpp]);
             Ok(())
         }
@@ -142,8 +140,9 @@ impl Decoder {
             (format.red_max   as u32) << format.red_shift   |
             (format.green_max as u32) << format.green_shift |
             (format.blue_max  as u32) << format.blue_shift;
+
         let (compressed_bpp, pad_pixel) =
-            if format.bits_per_pixel == 32 && format.true_colour == true && format.depth <= 24 {
+            if format.bits_per_pixel == 32 && format.true_colour && format.depth <= 24 {
                 if pixel_mask & 0x000000ff == 0 {
                     (3, !format.big_endian)
                 } else if pixel_mask & 0xff000000 == 0 {
@@ -166,21 +165,21 @@ impl Decoder {
                 let width = if x + 64 > rect.width { rect.width - x } else { 64 };
                 let pixel_count = height as usize * width as usize;
 
-                let is_rle = try!(reader.read_bit());
-                let palette_size = try!(reader.read_bits(7));
+                let is_rle = reader.read_bit()?;
+                let palette_size = reader.read_bits(7)?;
 
                 palette.truncate(0);
                 for _ in 0..palette_size {
-                    try!(copy_true_color(&mut reader, &mut palette,
-                                         pad_pixel, compressed_bpp, bpp))
+                    copy_true_color(&mut reader, &mut palette,
+                                         pad_pixel, compressed_bpp, bpp)?
                 }
 
                 let mut pixels = Vec::with_capacity(pixel_count * bpp);
                 match (is_rle, palette_size) {
                     (false, 0) => { // True Color pixels
                         for _ in 0..pixel_count {
-                            try!(copy_true_color(&mut reader, &mut pixels,
-                                                 pad_pixel, compressed_bpp, bpp))
+                            copy_true_color(&mut reader, &mut pixels,
+                                                 pad_pixel, compressed_bpp, bpp)?
                         }
                     },
                     (false, 1) => { // Color fill
@@ -188,14 +187,14 @@ impl Decoder {
                             copy_indexed(&palette, &mut pixels, bpp, 0)
                         }
                     },
-                    (false, 2) | (false, 3...4) | (false, 5...16) => { // Indexed pixels
+                    (false, 2) | (false, 3..=4) | (false, 5..=16) => { // Indexed pixels
                         let bits_per_index =
                             match palette_size {
-                                2 => 1, 3...4 => 2, 5...16 => 4, _ => unreachable!()
+                                2 => 1, 3..=4 => 2, 5..=16 => 4, _ => unreachable!()
                             };
                         for _ in 0..height {
                             for _ in 0..width {
-                                let index = try!(reader.read_bits(bits_per_index));
+                                let index = reader.read_bits(bits_per_index)?;
                                 copy_indexed(&palette, &mut pixels, bpp, index)
                             }
                             reader.align();
@@ -206,23 +205,23 @@ impl Decoder {
                         let mut pixel = Vec::new();
                         while count < pixel_count {
                             pixel.truncate(0);
-                            try!(copy_true_color(&mut reader, &mut pixel,
-                                                 pad_pixel, compressed_bpp, bpp));
-                            let run_length = try!(read_run_length(&mut reader));
+                            copy_true_color(&mut reader, &mut pixel,
+                                                 pad_pixel, compressed_bpp, bpp)?;
+                            let run_length = read_run_length(&mut reader)?;
                             for _ in 0..run_length {
                                 pixels.extend(&pixel)
                             }
                             count += run_length;
                         }
                     },
-                    (true, 2...127) => { // Indexed RLE
+                    (true, 2..=127) => { // Indexed RLE
                         let mut count = 0;
                         while count < pixel_count {
-                            let longer_than_one = try!(reader.read_bit());
-                            let index = try!(reader.read_bits(7));
+                            let longer_than_one = reader.read_bit()?;
+                            let index = reader.read_bits(7)?;
                             let run_length =
                                 if longer_than_one {
-                                    try!(read_run_length(&mut reader))
+                                    read_run_length(&mut reader)?
                                 } else {
                                     1
                                 };
@@ -236,8 +235,8 @@ impl Decoder {
                 }
 
                 let tile = Rect { top: rect.top + y, left: rect.left + x,
-                                  width: width, height: height };
-                if let false = try!(callback(tile, pixels)) {
+                                  width, height };
+                if let false = callback(tile, pixels)? {
                     return Ok(false)
                 }
 
@@ -246,7 +245,7 @@ impl Decoder {
             y += height;
         }
 
-        self.decompressor = Some(try!(try!(reader.into_inner()).into_inner()));
+        self.decompressor = Some(reader.into_inner()?.into_inner()?);
         Ok(true)
     }
 }

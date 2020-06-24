@@ -4,30 +4,28 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use byteorder::{BigEndian, ReadBytesExt};
-use ::{zrle, protocol, Rect, Colour, Error, Result};
+use crate::{zrle, protocol, Rect, Colour, Error, Result};
 use protocol::Message;
-use security::des;
+use crate::security::des;
 #[cfg(feature = "apple-auth")]
 use security::apple_auth;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AuthMethod {
     None,
     Password,
     AppleRemoteDesktop,
     /* more to come */
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AuthChoice {
     None,
     Password([u8; 8]),
     AppleRemoteDesktop(String, String),
     /* more to come */
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[derive(Debug)]
@@ -72,12 +70,12 @@ impl Event {
             match packet {
                 protocol::S2C::SetColourMapEntries { first_colour, colours } => {
                     send!(tx_events, Event::SetColourMap {
-                        first_colour: first_colour, colours: colours
+                        first_colour, colours,
                     })
                 },
                 protocol::S2C::FramebufferUpdate { count } => {
                     for _ in 0..count {
-                        let rectangle = try!(protocol::Rectangle::read_from(&mut stream));
+                        let rectangle = protocol::Rectangle::read_from(&mut stream)?;
                         debug!("<- {:?}", rectangle);
 
                         let dst = Rect {
@@ -93,45 +91,45 @@ impl Event {
                                              (format.bits_per_pixel as usize / 8);
                                 let mut pixels = Vec::with_capacity(length);
                                 unsafe { pixels.set_len(length as usize) }
-                                try!(stream.read_exact(&mut pixels));
+                                stream.read_exact(&mut pixels)?;
                                 debug!("<- ...pixels");
                                 send!(tx_events, Event::PutPixels(dst, pixels))
                             },
                             protocol::Encoding::CopyRect => {
-                                let copy_rect = try!(protocol::CopyRect::read_from(&mut stream));
+                                let copy_rect = protocol::CopyRect::read_from(&mut stream)?;
                                 let src = Rect {
                                     left:   copy_rect.src_x_position,
                                     top:    copy_rect.src_y_position,
                                     width:  rectangle.width,
                                     height: rectangle.height
                                 };
-                                send!(tx_events, Event::CopyPixels { src: src, dst: dst })
+                                send!(tx_events, Event::CopyPixels { src, dst })
                             },
                             protocol::Encoding::Zrle => {
-                                let length = try!(stream.read_u32::<BigEndian>());
+                                let length = stream.read_u32::<BigEndian>()?;
                                 let mut data = Vec::with_capacity(length as usize);
                                 unsafe { data.set_len(length as usize) }
-                                try!(stream.read_exact(&mut data));
+                                stream.read_exact(&mut data)?;
                                 debug!("<- ...compressed pixels");
-                                let result = try!(zrle_decoder.decode(format, dst, &data,
+                                let result = zrle_decoder.decode(format, dst, &data,
                                     |tile, pixels| {
                                         Ok(tx_events.send(Event::PutPixels(tile, pixels)).is_ok())
-                                    }));
+                                    })?;
                                 if !result { break }
                             }
                             protocol::Encoding::Cursor => {
                                 let mut pixels    = vec![0; (rectangle.width as usize) *
                                                             (rectangle.height as usize) *
                                                             (format.bits_per_pixel as usize / 8)];
-                                try!(stream.read_exact(&mut pixels));
+                                stream.read_exact(&mut pixels)?;
                                 let mut mask_bits = vec![0; ((rectangle.width as usize + 7) / 8) *
                                                             (rectangle.height as usize)];
-                                try!(stream.read_exact(&mut mask_bits));
+                                stream.read_exact(&mut mask_bits)?;
                                 send!(tx_events, Event::SetCursor {
                                     size:      (rectangle.width, rectangle.height),
                                     hotspot:   (rectangle.x_position, rectangle.y_position),
-                                    pixels:    pixels,
-                                    mask_bits: mask_bits
+                                    pixels,
+                                    mask_bits,
                                 })
                             },
                             protocol::Encoding::DesktopSize => {
@@ -167,14 +165,14 @@ impl Client {
     pub fn from_tcp_stream<Auth>(mut stream: TcpStream, shared: bool,
                                  auth: Auth) -> Result<Client>
             where Auth: FnOnce(&[AuthMethod]) -> Option<AuthChoice> {
-        let version = try!(protocol::Version::read_from(&mut stream));
+        let version = protocol::Version::read_from(&mut stream)?;
         debug!("<- Version::{:?}", version);
         debug!("-> Version::{:?}", version);
-        try!(protocol::Version::write_to(&version, &mut stream));
+        protocol::Version::write_to(&version, &mut stream)?;
 
         let security_types = match version {
             protocol::Version::Rfb33 => {
-                let security_type = try!(protocol::SecurityType::read_from(&mut stream));
+                let security_type = protocol::SecurityType::read_from(&mut stream)?;
                 debug!("<- SecurityType::{:?}", security_type);
                 if security_type == protocol::SecurityType::Invalid {
                     vec![]
@@ -183,14 +181,14 @@ impl Client {
                 }
             },
             _ => {
-                let security_types = try!(protocol::SecurityTypes::read_from(&mut stream));
+                let security_types = protocol::SecurityTypes::read_from(&mut stream)?;
                 debug!("<- {:?}", security_types);
                 security_types.0
             }
         };
 
-        if security_types.len() == 0 {
-            let reason = try!(String::read_from(&mut stream));
+        if security_types.is_empty() {
+            let reason = String::read_from(&mut stream)?;
             debug!("<- {:?}", reason);
             return Err(Error::Server(reason))
         }
@@ -208,7 +206,7 @@ impl Client {
             }
         }
 
-        let auth_choice = try!(auth(&auth_methods).ok_or(Error::AuthenticationUnavailable));
+        let auth_choice = auth(&auth_methods).ok_or(Error::AuthenticationUnavailable)?;
 
         match version {
             protocol::Version::Rfb33 => (),
@@ -217,10 +215,9 @@ impl Client {
                     AuthChoice::None => protocol::SecurityType::None,
                     AuthChoice::Password(_) => protocol::SecurityType::VncAuthentication,
                     AuthChoice::AppleRemoteDesktop(_, _) => protocol::SecurityType::AppleRemoteDesktop,
-                    AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
-                try!(protocol::SecurityType::write_to(&used_security_type, &mut stream));
+                protocol::SecurityType::write_to(&used_security_type, &mut stream)?;
             }
         }
 
@@ -243,15 +240,15 @@ impl Client {
                 }
 
                 let mut challenge = [0; 16];
-                try!(stream.read_exact(&mut challenge));
+                stream.read_exact(&mut challenge)?;
                 let response = des(&challenge, &password);
-                try!(stream.write(&response));
+                stream.write_all(&response)?;
             },
             #[cfg(feature = "apple-auth")]
             AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
-                let handshake = try!(protocol::AppleAuthHandshake::read_from(&mut stream));
+                let handshake = protocol::AppleAuthHandshake::read_from(&mut stream)?;
                 let response = apple_auth(username, password, &handshake);
-                try!(response.write_to(&mut stream));
+                response.write_to(&mut stream)?;
             },
             _ => (),
         }
@@ -264,7 +261,7 @@ impl Client {
         }
 
         if !skip_security_result {
-            match try!(protocol::SecurityResult::read_from(&mut stream)) {
+            match protocol::SecurityResult::read_from(&mut stream)? {
                 protocol::SecurityResult::Succeeded => (),
                 protocol::SecurityResult::Failed => {
                     match version {
@@ -272,7 +269,7 @@ impl Client {
                         protocol::Version::Rfb37 =>
                             return Err(Error::AuthenticationFailure(String::from(""))),
                         protocol::Version::Rfb38 => {
-                            let reason = try!(String::read_from(&mut stream));
+                            let reason = String::read_from(&mut stream)?;
                             debug!("<- {:?}", reason);
                             return Err(Error::AuthenticationFailure(reason))
                         }
@@ -281,11 +278,11 @@ impl Client {
             }
         }
 
-        let client_init = protocol::ClientInit { shared: shared };
+        let client_init = protocol::ClientInit { shared };
         debug!("-> {:?}", client_init);
-        try!(protocol::ClientInit::write_to(&client_init, &mut stream));
+        protocol::ClientInit::write_to(&client_init, &mut stream)?;
 
-        let server_init = try!(protocol::ServerInit::read_from(&mut stream));
+        let server_init = protocol::ServerInit::read_from(&mut stream)?;
         debug!("<- {:?}", server_init);
 
         let format = Arc::new(Mutex::new(server_init.pixel_format));
@@ -302,11 +299,11 @@ impl Client {
         }
 
         Ok(Client {
-            stream:  stream,
+            stream,
             events:  rx_events,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
-            format:  format
+            format,
         })
     }
 
@@ -317,30 +314,30 @@ impl Client {
     pub fn set_encodings(&mut self, encodings: &[protocol::Encoding]) -> Result<()> {
         let set_encodings = protocol::C2S::SetEncodings(Vec::from(encodings));
         debug!("-> {:?}", set_encodings);
-        try!(protocol::C2S::write_to(&set_encodings, &mut self.stream));
+        protocol::C2S::write_to(&set_encodings, &mut self.stream)?;
         Ok(())
     }
 
     pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {
-            incremental: incremental,
+            incremental,
             x_position:  rect.left,
             y_position:  rect.top,
             width:       rect.width,
             height:      rect.height
         };
         trace!("-> {:?}", update_req);
-        try!(protocol::C2S::write_to(&update_req, &mut self.stream));
+        protocol::C2S::write_to(&update_req, &mut self.stream)?;
         Ok(())
     }
 
     pub fn send_key_event(&mut self, down: bool, key: u32) -> Result<()> {
         let key_event = protocol::C2S::KeyEvent {
-            down: down,
-            key:  key
+            down,
+            key,
         };
         debug!("-> {:?}", key_event);
-        try!(protocol::C2S::write_to(&key_event, &mut self.stream));
+        protocol::C2S::write_to(&key_event, &mut self.stream)?;
         Ok(())
     }
 
@@ -351,14 +348,14 @@ impl Client {
             y_position:  y
         };
         debug!("-> {:?}", pointer_event);
-        try!(protocol::C2S::write_to(&pointer_event, &mut self.stream));
+        protocol::C2S::write_to(&pointer_event, &mut self.stream)?;
         Ok(())
     }
 
     pub fn update_clipboard(&mut self, text: &str) -> Result<()> {
         let cut_text = protocol::C2S::CutText(String::from(text));
         debug!("-> {:?}", cut_text);
-        try!(protocol::C2S::write_to(&cut_text, &mut self.stream));
+        protocol::C2S::write_to(&cut_text, &mut self.stream)?;
         Ok(())
     }
 
@@ -372,7 +369,7 @@ impl Client {
         // This is not fully robust though (and cannot possibly be).
         let _ = self.poll_iter().count(); // drain it
         let framebuffer_rect = Rect { left: 0, top: 0, width: self.size.0, height: self.size.1 };
-        try!(self.request_update(framebuffer_rect, false));
+        self.request_update(framebuffer_rect, false)?;
         'outer: loop {
             for event in self.poll_iter() {
                 match event {
@@ -387,7 +384,7 @@ impl Client {
         // so it's safe to switch to the new pixel format.
         let set_pixel_format = protocol::C2S::SetPixelFormat(format);
         debug!("-> {:?}", set_pixel_format);
-        try!(protocol::C2S::write_to(&set_pixel_format, &mut self.stream));
+        protocol::C2S::write_to(&set_pixel_format, &mut self.stream)?;
         *self.format.lock().unwrap() = format;
 
         Ok(())
@@ -397,7 +394,7 @@ impl Client {
     pub fn poke_qemu(&mut self) -> Result<()> {
         let set_pixel_format = protocol::C2S::SetPixelFormat(*self.format.lock().unwrap());
         debug!("-> {:?}", set_pixel_format);
-        try!(protocol::C2S::write_to(&set_pixel_format, &mut self.stream));
+        protocol::C2S::write_to(&set_pixel_format, &mut self.stream)?;
         Ok(())
     }
 
@@ -418,7 +415,7 @@ impl Client {
     }
 
     pub fn disconnect(self) -> Result<()> {
-        try!(self.stream.shutdown(Shutdown::Both));
+        self.stream.shutdown(Shutdown::Both)?;
         Ok(())
     }
 }

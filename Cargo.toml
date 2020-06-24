@@ -8,6 +8,7 @@ repository = "https://github.com/whitequark/rust-vnc"
 homepage = "https://github.com/whitequark/rust-vnc"
 documentation = "https://whitequark.github.io/rust-vnc/vnc"
 description = "An implementation of VNC protocol, client state machine, a client and a proxy"
+edition = "2018"
 
 [features]
 apple-auth = ["num-bigint", "octavo", "rust-crypto"]

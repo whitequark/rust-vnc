@@ -40,33 +40,22 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
-            &Error::Io(ref inner) => inner.fmt(f),
-            &Error::Unexpected(ref descr) =>
+            Error::Io(ref inner) => inner.fmt(f),
+            Error::Unexpected(ref descr) =>
                 write!(f, "unexpected {}", descr),
-            &Error::Server(ref descr) =>
+            Error::Server(ref descr) =>
                 write!(f, "server error: {}", descr),
-            &Error::AuthenticationFailure(ref descr) =>
+            Error::AuthenticationFailure(ref descr) =>
                 write!(f, "authentication failure: {}", descr),
-            _ => f.write_str(std::error::Error::description(self))
+            _ => f.write_str(&self.to_string())
         }
     }
 }
 
 impl std::error::Error for Error {
-    fn description(&self) -> &str {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         match self {
-            &Error::Io(ref inner) => inner.description(),
-            &Error::Unexpected(_) => "unexpected value",
-            &Error::Server(_) => "server error",
-            &Error::AuthenticationUnavailable => "authentication unavailable",
-            &Error::AuthenticationFailure(_) => "authentication failure",
-            &Error::Disconnected => "peer disconnected",
-        }
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        match self {
-            &Error::Io(ref inner) => Some(inner),
+            Error::Io(ref inner) => Some(inner),
             _ => None
         }
     }

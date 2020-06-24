@@ -1,6 +1,6 @@
 use std::io::{ErrorKind as IoErrorKind, Read, Write};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use ::{Error, Result};
+use crate::{Error, Result};
 
 pub trait Message {
     fn read_from<R: Read>(reader: &mut R) -> Result<Self> where Self: Sized;
@@ -9,16 +9,16 @@ pub trait Message {
 
 impl Message for Vec<u8> {
     fn read_from<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
-        let length = try!(reader.read_u32::<BigEndian>());
+        let length = reader.read_u32::<BigEndian>()?;
         let mut buffer = vec![0; length as usize];
-        try!(reader.read_exact(&mut buffer));
+        reader.read_exact(&mut buffer)?;
         Ok(buffer)
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let length = self.len() as u32; // TODO: check?
-        try!(writer.write_u32::<BigEndian>(length));
-        try!(writer.write_all(&self));
+        writer.write_u32::<BigEndian>(length)?;
+        writer.write_all(&self)?;
         Ok(())
     }
 }
@@ -27,16 +27,16 @@ impl Message for Vec<u8> {
    are embedded in Unicode. */
 impl Message for String {
     fn read_from<R: Read>(reader: &mut R) -> Result<String> {
-        let length = try!(reader.read_u32::<BigEndian>());
+        let length = reader.read_u32::<BigEndian>()?;
         let mut string = vec![0; length as usize];
-        try!(reader.read_exact(&mut string));
+        reader.read_exact(&mut string)?;
         Ok(string.iter().map(|c| *c as char).collect())
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let length = self.len() as u32; // TODO: check?
-        try!(writer.write_u32::<BigEndian>(length));
-        try!(writer.write_all(&self.chars().map(|c| c as u8).collect::<Vec<u8>>()));
+        writer.write_u32::<BigEndian>(length)?;
+        writer.write_all(&self.chars().map(|c| c as u8).collect::<Vec<u8>>())?;
         Ok(())
     }
 }
@@ -51,7 +51,7 @@ pub enum Version {
 impl Message for Version {
     fn read_from<R: Read>(reader: &mut R) -> Result<Version> {
         let mut buf = [0; 12];
-        try!(reader.read_exact(&mut buf));
+        reader.read_exact(&mut buf)?;
         match &buf {
             b"RFB 003.003\n" => Ok(Version::Rfb33),
             b"RFB 003.007\n" => Ok(Version::Rfb37),
@@ -63,11 +63,11 @@ impl Message for Version {
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(match self {
+        match self {
             &Version::Rfb33 => writer.write_all(b"RFB 003.003\n"),
             &Version::Rfb37 => writer.write_all(b"RFB 003.007\n"),
             &Version::Rfb38 => writer.write_all(b"RFB 003.008\n"),
-        });
+        }?;
         Ok(())
     }
 }
@@ -85,7 +85,7 @@ pub enum SecurityType {
 
 impl Message for SecurityType {
     fn read_from<R: Read>(reader: &mut R) -> Result<SecurityType> {
-        let security_type = try!(reader.read_u8());
+        let security_type = reader.read_u8()?;
         match security_type {
             0  => Ok(SecurityType::Invalid),
             1  => Ok(SecurityType::None),
@@ -103,7 +103,7 @@ impl Message for SecurityType {
             &SecurityType::AppleRemoteDesktop => 30,
             &SecurityType::Unknown(n) => n
         };
-        try!(writer.write_u8(security_type));
+        writer.write_u8(security_type)?;
         Ok(())
     }
 }
@@ -113,19 +113,19 @@ pub struct SecurityTypes(pub Vec<SecurityType>);
 
 impl Message for SecurityTypes {
     fn read_from<R: Read>(reader: &mut R) -> Result<SecurityTypes> {
-        let count = try!(reader.read_u8());
+        let count = reader.read_u8()?;
         let mut security_types = Vec::new();
         for _ in 0..count {
-            security_types.push(try!(SecurityType::read_from(reader)))
+            security_types.push(SecurityType::read_from(reader)?)
         }
         Ok(SecurityTypes(security_types))
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let count = self.0.len() as u8; // TODO: check?
-        try!(writer.write_u8(count));
+        writer.write_u8(count)?;
         for security_type in &self.0 {
-            try!(security_type.write_to(writer));
+            security_type.write_to(writer)?;
         }
         Ok(())
     }
@@ -139,7 +139,7 @@ pub enum SecurityResult {
 
 impl Message for SecurityResult {
     fn read_from<R: Read>(reader: &mut R) -> Result<SecurityResult> {
-        let result = try!(reader.read_u32::<BigEndian>());
+        let result = reader.read_u32::<BigEndian>()?;
         match result {
             0 => Ok(SecurityResult::Succeeded),
             1 => Ok(SecurityResult::Failed),
@@ -152,7 +152,7 @@ impl Message for SecurityResult {
             &SecurityResult::Succeeded => 0,
             &SecurityResult::Failed => 1
         };
-        try!(writer.write_u32::<BigEndian>(result));
+        writer.write_u32::<BigEndian>(result)?;
         Ok(())
     }
 }
@@ -166,14 +166,14 @@ pub struct AppleAuthHandshake {
 
 impl Message for AppleAuthHandshake {
     fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let generator = try!(reader.read_u16::<BigEndian>());
-        let key_length = try!(reader.read_u16::<BigEndian>());
+        let generator = reader.read_u16::<BigEndian>()?;
+        let key_length = reader.read_u16::<BigEndian>()?;
 
         let mut prime = vec![0; key_length as usize];
-        try!(reader.read_exact(&mut prime));
+        reader.read_exact(&mut prime)?;
 
         let mut peer_key = vec![0; key_length as usize];
-        try!(reader.read_exact(&mut peer_key));
+        reader.read_exact(&mut peer_key)?;
 
         Ok(AppleAuthHandshake {
             generator: generator,
@@ -199,8 +199,8 @@ impl Message for AppleAuthResponse {
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_all(&self.ciphertext));
-        try!(writer.write_all(&self.pub_key));
+        writer.write_all(&self.ciphertext)?;
+        writer.write_all(&self.pub_key)?;
         Ok(())
     }
 }
@@ -213,12 +213,12 @@ pub struct ClientInit {
 impl Message for ClientInit {
     fn read_from<R: Read>(reader: &mut R) -> Result<ClientInit> {
         Ok(ClientInit {
-            shared: try!(reader.read_u8()) != 0
+            shared: reader.read_u8()? != 0
         })
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u8(if self.shared { 1 } else { 0 }));
+        writer.write_u8(if self.shared { 1 } else { 0 })?;
         Ok(())
     }
 }
@@ -240,33 +240,33 @@ pub struct PixelFormat {
 impl Message for PixelFormat {
     fn read_from<R: Read>(reader: &mut R) -> Result<PixelFormat> {
         let pixel_format = PixelFormat {
-            bits_per_pixel: try!(reader.read_u8()),
-            depth:          try!(reader.read_u8()),
-            big_endian:     try!(reader.read_u8()) != 0,
-            true_colour:    try!(reader.read_u8()) != 0,
-            red_max:        try!(reader.read_u16::<BigEndian>()),
-            green_max:      try!(reader.read_u16::<BigEndian>()),
-            blue_max:       try!(reader.read_u16::<BigEndian>()),
-            red_shift:      try!(reader.read_u8()),
-            green_shift:    try!(reader.read_u8()),
-            blue_shift:     try!(reader.read_u8()),
+            bits_per_pixel: reader.read_u8()?,
+            depth:          reader.read_u8()?,
+            big_endian:     reader.read_u8()? != 0,
+            true_colour:    reader.read_u8()? != 0,
+            red_max:        reader.read_u16::<BigEndian>()?,
+            green_max:      reader.read_u16::<BigEndian>()?,
+            blue_max:       reader.read_u16::<BigEndian>()?,
+            red_shift:      reader.read_u8()?,
+            green_shift:    reader.read_u8()?,
+            blue_shift:     reader.read_u8()?,
         };
-        try!(reader.read_exact(&mut [0u8; 3]));
+        reader.read_exact(&mut [0u8; 3])?;
         Ok(pixel_format)
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u8(self.bits_per_pixel));
-        try!(writer.write_u8(self.depth));
-        try!(writer.write_u8(if self.big_endian { 1 } else { 0 }));
-        try!(writer.write_u8(if self.true_colour { 1 } else { 0 }));
-        try!(writer.write_u16::<BigEndian>(self.red_max));
-        try!(writer.write_u16::<BigEndian>(self.green_max));
-        try!(writer.write_u16::<BigEndian>(self.blue_max));
-        try!(writer.write_u8(self.red_shift));
-        try!(writer.write_u8(self.green_shift));
-        try!(writer.write_u8(self.blue_shift));
-        try!(writer.write_all(&[0u8; 3]));
+        writer.write_u8(self.bits_per_pixel)?;
+        writer.write_u8(self.depth)?;
+        writer.write_u8(if self.big_endian { 1 } else { 0 })?;
+        writer.write_u8(if self.true_colour { 1 } else { 0 })?;
+        writer.write_u16::<BigEndian>(self.red_max)?;
+        writer.write_u16::<BigEndian>(self.green_max)?;
+        writer.write_u16::<BigEndian>(self.blue_max)?;
+        writer.write_u8(self.red_shift)?;
+        writer.write_u8(self.green_shift)?;
+        writer.write_u8(self.blue_shift)?;
+        writer.write_all(&[0u8; 3])?;
         Ok(())
     }
 }
@@ -282,18 +282,18 @@ pub struct ServerInit {
 impl Message for ServerInit {
     fn read_from<R: Read>(reader: &mut R) -> Result<ServerInit> {
         Ok(ServerInit {
-            framebuffer_width:  try!(reader.read_u16::<BigEndian>()),
-            framebuffer_height: try!(reader.read_u16::<BigEndian>()),
-            pixel_format:       try!(PixelFormat::read_from(reader)),
-            name:               try!(String::read_from(reader))
+            framebuffer_width:  reader.read_u16::<BigEndian>()?,
+            framebuffer_height: reader.read_u16::<BigEndian>()?,
+            pixel_format:       PixelFormat::read_from(reader)?,
+            name:               String::read_from(reader)?
         })
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u16::<BigEndian>(self.framebuffer_width));
-        try!(writer.write_u16::<BigEndian>(self.framebuffer_height));
-        try!(PixelFormat::write_to(&self.pixel_format, writer));
-        try!(String::write_to(&self.name, writer));
+        writer.write_u16::<BigEndian>(self.framebuffer_width)?;
+        writer.write_u16::<BigEndian>(self.framebuffer_height)?;
+        PixelFormat::write_to(&self.pixel_format, writer)?;
+        String::write_to(&self.name, writer)?;
         Ok(())
     }
 }
@@ -307,14 +307,14 @@ pub struct CopyRect {
 impl Message for CopyRect {
     fn read_from<R: Read>(reader: &mut R) -> Result<CopyRect> {
         Ok(CopyRect {
-            src_x_position: try!(reader.read_u16::<BigEndian>()),
-            src_y_position: try!(reader.read_u16::<BigEndian>())
+            src_x_position: reader.read_u16::<BigEndian>()?,
+            src_y_position: reader.read_u16::<BigEndian>()?
         })
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u16::<BigEndian>(self.src_x_position));
-        try!(writer.write_u16::<BigEndian>(self.src_y_position));
+        writer.write_u16::<BigEndian>(self.src_x_position)?;
+        writer.write_u16::<BigEndian>(self.src_y_position)?;
         Ok(())
     }
 }
@@ -335,7 +335,7 @@ pub enum Encoding {
 
 impl Message for Encoding {
     fn read_from<R: Read>(reader: &mut R) -> Result<Encoding> {
-        let encoding = try!(reader.read_i32::<BigEndian>());
+        let encoding = reader.read_i32::<BigEndian>()?;
         match encoding {
             0    => Ok(Encoding::Raw),
             1    => Ok(Encoding::CopyRect),
@@ -359,7 +359,7 @@ impl Message for Encoding {
             &Encoding::DesktopSize => -223,
             &Encoding::Unknown(n) => n
         };
-        try!(writer.write_i32::<BigEndian>(encoding));
+        writer.write_i32::<BigEndian>(encoding)?;
         Ok(())
     }
 }
@@ -395,47 +395,47 @@ impl Message for C2S {
             match reader.read_u8() {
                 Err(ref e) if e.kind() == IoErrorKind::UnexpectedEof =>
                     return Err(Error::Disconnected),
-                result => try!(result)
+                result => result?
             };
         match message_type {
             0 => {
-                try!(reader.read_exact(&mut [0u8; 3]));
-                Ok(C2S::SetPixelFormat(try!(PixelFormat::read_from(reader))))
+                reader.read_exact(&mut [0u8; 3])?;
+                Ok(C2S::SetPixelFormat(PixelFormat::read_from(reader)?))
             },
             2 => {
-                try!(reader.read_exact(&mut [0u8; 1]));
-                let count = try!(reader.read_u16::<BigEndian>());
+                reader.read_exact(&mut [0u8; 1])?;
+                let count = reader.read_u16::<BigEndian>()?;
                 let mut encodings = Vec::new();
                 for _ in 0..count {
-                    encodings.push(try!(Encoding::read_from(reader)));
+                    encodings.push(Encoding::read_from(reader)?);
                 }
                 Ok(C2S::SetEncodings(encodings))
             },
             3 => {
                 Ok(C2S::FramebufferUpdateRequest {
-                    incremental: try!(reader.read_u8()) != 0,
-                    x_position:  try!(reader.read_u16::<BigEndian>()),
-                    y_position:  try!(reader.read_u16::<BigEndian>()),
-                    width:       try!(reader.read_u16::<BigEndian>()),
-                    height:      try!(reader.read_u16::<BigEndian>())
+                    incremental: reader.read_u8()? != 0,
+                    x_position:  reader.read_u16::<BigEndian>()?,
+                    y_position:  reader.read_u16::<BigEndian>()?,
+                    width:       reader.read_u16::<BigEndian>()?,
+                    height:      reader.read_u16::<BigEndian>()?
                 })
             },
             4 => {
-                let down = try!(reader.read_u8()) != 0;
-                try!(reader.read_exact(&mut [0u8; 2]));
-                let key = try!(reader.read_u32::<BigEndian>());
+                let down = reader.read_u8()? != 0;
+                reader.read_exact(&mut [0u8; 2])?;
+                let key = reader.read_u32::<BigEndian>()?;
                 Ok(C2S::KeyEvent { down: down, key: key })
             },
             5 => {
                 Ok(C2S::PointerEvent {
-                    button_mask: try!(reader.read_u8()),
-                    x_position:  try!(reader.read_u16::<BigEndian>()),
-                    y_position:  try!(reader.read_u16::<BigEndian>())
+                    button_mask: reader.read_u8()?,
+                    x_position:  reader.read_u16::<BigEndian>()?,
+                    y_position:  reader.read_u16::<BigEndian>()?
                 })
             },
             6 => {
-                try!(reader.read_exact(&mut [0u8; 3]));
-                Ok(C2S::CutText(try!(String::read_from(reader))))
+                reader.read_exact(&mut [0u8; 3])?;
+                Ok(C2S::CutText(String::read_from(reader)?))
             },
             _ => Err(Error::Unexpected("client to server message type"))
         }
@@ -443,40 +443,40 @@ impl Message for C2S {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
             &C2S::SetPixelFormat(ref pixel_format) => {
-                try!(writer.write_u8(0));
-                try!(writer.write_all(&[0u8; 3]));
-                try!(PixelFormat::write_to(pixel_format, writer));
+                writer.write_u8(0)?;
+                writer.write_all(&[0u8; 3])?;
+                PixelFormat::write_to(pixel_format, writer)?;
             },
             &C2S::SetEncodings(ref encodings) => {
-                try!(writer.write_u8(2));
-                try!(writer.write_all(&[0u8; 1]));
-                try!(writer.write_u16::<BigEndian>(encodings.len() as u16)); // TODO: check?
+                writer.write_u8(2)?;
+                writer.write_all(&[0u8; 1])?;
+                writer.write_u16::<BigEndian>(encodings.len() as u16)?; // TODO: check?
                 for encoding in encodings {
-                    try!(Encoding::write_to(encoding, writer));
+                    Encoding::write_to(encoding, writer)?;
                 }
             },
             &C2S::FramebufferUpdateRequest { incremental, x_position, y_position, width, height } => {
-                try!(writer.write_u8(3));
-                try!(writer.write_u8(if incremental { 1 } else { 0 }));
-                try!(writer.write_u16::<BigEndian>(x_position));
-                try!(writer.write_u16::<BigEndian>(y_position));
-                try!(writer.write_u16::<BigEndian>(width));
-                try!(writer.write_u16::<BigEndian>(height));
+                writer.write_u8(3)?;
+                writer.write_u8(if incremental { 1 } else { 0 })?;
+                writer.write_u16::<BigEndian>(x_position)?;
+                writer.write_u16::<BigEndian>(y_position)?;
+                writer.write_u16::<BigEndian>(width)?;
+                writer.write_u16::<BigEndian>(height)?;
             },
             &C2S::KeyEvent { down, key } => {
-                try!(writer.write_u8(4));
-                try!(writer.write_u8(if down { 1 } else { 0 }));
-                try!(writer.write_all(&[0u8; 2]));
-                try!(writer.write_u32::<BigEndian>(key));
+                writer.write_u8(4)?;
+                writer.write_u8(if down { 1 } else { 0 })?;
+                writer.write_all(&[0u8; 2])?;
+                writer.write_u32::<BigEndian>(key)?;
             },
             &C2S::PointerEvent { button_mask, x_position, y_position } => {
-                try!(writer.write_u8(5));
-                try!(writer.write_u8(button_mask));
-                try!(writer.write_u16::<BigEndian>(x_position));
-                try!(writer.write_u16::<BigEndian>(y_position));
+                writer.write_u8(5)?;
+                writer.write_u8(button_mask)?;
+                writer.write_u16::<BigEndian>(x_position)?;
+                writer.write_u16::<BigEndian>(y_position)?;
             },
             &C2S::CutText(ref text) => {
-                try!(String::write_to(text, writer));
+                String::write_to(text, writer)?;
             }
         }
         Ok(())
@@ -495,20 +495,20 @@ pub struct Rectangle {
 impl Message for Rectangle {
     fn read_from<R: Read>(reader: &mut R) -> Result<Rectangle> {
         Ok(Rectangle {
-            x_position: try!(reader.read_u16::<BigEndian>()),
-            y_position: try!(reader.read_u16::<BigEndian>()),
-            width:      try!(reader.read_u16::<BigEndian>()),
-            height:     try!(reader.read_u16::<BigEndian>()),
-            encoding:   try!(Encoding::read_from(reader))
+            x_position: reader.read_u16::<BigEndian>()?,
+            y_position: reader.read_u16::<BigEndian>()?,
+            width:      reader.read_u16::<BigEndian>()?,
+            height:     reader.read_u16::<BigEndian>()?,
+            encoding:   Encoding::read_from(reader)?
         })
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u16::<BigEndian>(self.x_position));
-        try!(writer.write_u16::<BigEndian>(self.y_position));
-        try!(writer.write_u16::<BigEndian>(self.width));
-        try!(writer.write_u16::<BigEndian>(self.height));
-        try!(Encoding::write_to(&self.encoding, writer));
+        writer.write_u16::<BigEndian>(self.x_position)?;
+        writer.write_u16::<BigEndian>(self.y_position)?;
+        writer.write_u16::<BigEndian>(self.width)?;
+        writer.write_u16::<BigEndian>(self.height)?;
+        Encoding::write_to(&self.encoding, writer)?;
         Ok(())
     }
 }
@@ -523,16 +523,16 @@ pub struct Colour {
 impl Message for Colour {
     fn read_from<R: Read>(reader: &mut R) -> Result<Colour> {
         Ok(Colour {
-            red:   try!(reader.read_u16::<BigEndian>()),
-            green: try!(reader.read_u16::<BigEndian>()),
-            blue:  try!(reader.read_u16::<BigEndian>())
+            red:   reader.read_u16::<BigEndian>()?,
+            green: reader.read_u16::<BigEndian>()?,
+            blue:  reader.read_u16::<BigEndian>()?
         })
     }
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        try!(writer.write_u16::<BigEndian>(self.red));
-        try!(writer.write_u16::<BigEndian>(self.green));
-        try!(writer.write_u16::<BigEndian>(self.blue));
+        writer.write_u16::<BigEndian>(self.red)?;
+        writer.write_u16::<BigEndian>(self.green)?;
+        writer.write_u16::<BigEndian>(self.blue)?;
         Ok(())
     }
 }
@@ -559,22 +559,22 @@ impl Message for S2C {
             match reader.read_u8() {
                 Err(ref e) if e.kind() == IoErrorKind::UnexpectedEof =>
                     return Err(Error::Disconnected),
-                result => try!(result)
+                result => result?
             };
         match message_type {
             0 => {
-                try!(reader.read_exact(&mut [0u8; 1]));
+                reader.read_exact(&mut [0u8; 1])?;
                 Ok(S2C::FramebufferUpdate {
-                    count: try!(reader.read_u16::<BigEndian>())
+                    count: reader.read_u16::<BigEndian>()?
                 })
             },
             1 => {
-                try!(reader.read_exact(&mut [0u8; 1]));
-                let first_colour = try!(reader.read_u16::<BigEndian>());
-                let count = try!(reader.read_u16::<BigEndian>());
+                reader.read_exact(&mut [0u8; 1])?;
+                let first_colour = reader.read_u16::<BigEndian>()?;
+                let count = reader.read_u16::<BigEndian>()?;
                 let mut colours = Vec::new();
                 for _ in 0..count {
-                    colours.push(try!(Colour::read_from(reader)));
+                    colours.push(Colour::read_from(reader)?);
                 }
                 Ok(S2C::SetColourMapEntries { first_colour: first_colour, colours: colours })
             },
@@ -582,8 +582,8 @@ impl Message for S2C {
                 Ok(S2C::Bell)
             },
             3 => {
-                try!(reader.read_exact(&mut [0u8; 3]));
-                Ok(S2C::CutText(try!(String::read_from(reader))))
+                reader.read_exact(&mut [0u8; 3])?;
+                Ok(S2C::CutText(String::read_from(reader)?))
             },
             _ => Err(Error::Unexpected("server to client message type"))
         }
@@ -592,25 +592,25 @@ impl Message for S2C {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
             &S2C::FramebufferUpdate { count } => {
-                try!(writer.write_u8(0));
-                try!(writer.write_all(&[0u8; 1]));
-                try!(writer.write_u16::<BigEndian>(count));
+                writer.write_u8(0)?;
+                writer.write_all(&[0u8; 1])?;
+                writer.write_u16::<BigEndian>(count)?;
             },
             &S2C::SetColourMapEntries { first_colour, ref colours } => {
-                try!(writer.write_u8(1));
-                try!(writer.write_all(&[0u8; 1]));
-                try!(writer.write_u16::<BigEndian>(first_colour));
+                writer.write_u8(1)?;
+                writer.write_all(&[0u8; 1])?;
+                writer.write_u16::<BigEndian>(first_colour)?;
                 for colour in colours {
-                    try!(Colour::write_to(colour, writer));
+                    Colour::write_to(colour, writer)?;
                 }
             },
             &S2C::Bell => {
-                try!(writer.write_u8(2));
+                writer.write_u8(2)?;
             },
             &S2C::CutText(ref text) => {
-                try!(writer.write_u8(3));
-                try!(writer.write_all(&[0u8; 3]));
-                try!(String::write_to(text, writer));
+                writer.write_u8(3)?;
+                writer.write_all(&[0u8; 3])?;
+                String::write_to(text, writer)?;
             }
         }
         Ok(())

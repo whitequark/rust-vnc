@@ -1,13 +1,15 @@
-extern crate env_logger;
+/*extern crate env_logger;
 #[macro_use] extern crate log;
 #[macro_use] extern crate clap;
 extern crate vnc;
 extern crate sdl2;
 extern crate x11;
-extern crate byteorder;
+extern crate byteorder;*/
+
+use log::{info, error, debug, warn};
 
 use std::io::{Result as IoResult, ErrorKind as IoErrorKind, Read, Write, Cursor};
-use clap::{Arg, App};
+use clap::{Arg, App, value_t};
 use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum as SdlPixelFormat};
 use sdl2::rect::Rect as SdlRect;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
@@ -93,7 +95,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
 
     fn read_color<R: Read>(reader: &mut R, size: usize, masks: &PixelMasks) ->
             IoResult<Color> {
-        let packed = try!(reader.read_uint::<NativeEndian>(size));
+        let packed = reader.read_uint::<NativeEndian>(size)?;
         Ok(Color::RGB(
             ((packed as u32 & masks.rmask) >> masks.rmask.trailing_zeros()) as u8,
             ((packed as u32 & masks.gmask) >> masks.gmask.trailing_zeros()) as u8,
@@ -135,7 +137,7 @@ fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels:
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let matches = App::new("rvncclient")
         .about("VNC client")

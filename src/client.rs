@@ -221,7 +221,6 @@ impl Client {
             }
         }
 
-        #[allow(clippy::single_match)]
         match auth_choice {
             AuthChoice::Password(mut password) => {
                 // Reverse the bits in every byte of password.
@@ -233,7 +232,6 @@ impl Client {
                 // I hate every single fucker involved in the chain of decisions that
                 // led to this authentication scheme, and doubly so because it is completely
                 // undocumented in what passes for the specification of the RFB protocol.
-                #[allow(clippy::needless_range_loop)]
                 for i in 0..8 {
                     let c = password[i];
                     let mut cs = 0u8;

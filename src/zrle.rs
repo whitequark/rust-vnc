@@ -140,7 +140,7 @@ impl Decoder {
             (format.red_max   as u32) << format.red_shift   |
             (format.green_max as u32) << format.green_shift |
             (format.blue_max  as u32) << format.blue_shift;
-        #[allow(clippy::verbose_bit_mask)]
+
         let (compressed_bpp, pad_pixel) =
             if format.bits_per_pixel == 32 && format.true_colour && format.depth <= 24 {
                 if pixel_mask & 0x000000ff == 0 {

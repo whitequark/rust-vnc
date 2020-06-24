@@ -174,7 +174,6 @@ impl Proxy {
                 debug!("c<-s {:?}", message);
                 protocol::S2C::write_to(&message, &mut buffer_stream)?;
 
-                #[allow(clippy::single_match)]
                 match message {
                     protocol::S2C::FramebufferUpdate { count } => {
                         for _ in 0..count {

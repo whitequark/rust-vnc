@@ -181,7 +181,6 @@ fn main() {
             }
         };
 
-    #[allow(clippy::single_match)]
     let mut vnc =
         match vnc::Client::from_tcp_stream(stream, !exclusive, |methods| {
             debug!("available authentication methods: {:?}", methods);
@@ -374,7 +373,6 @@ fn main() {
             if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
         }
 
-        #[allow(clippy::single_match)]
         match cursor_rect {
             Some(cursor_rect) =>
                 renderer.copy(&screen, Some(cursor_rect), Some(cursor_rect)),
@@ -424,7 +422,6 @@ fn main() {
 
             if view_only { continue }
 
-            #[allow(clippy::single_match)]
             match event {
                 Event::KeyDown { keycode: Some(keycode), .. } |
                 Event::KeyUp { keycode: Some(keycode), .. } => {

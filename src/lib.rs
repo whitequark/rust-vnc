@@ -40,12 +40,12 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
         match self {
-            &Error::Io(ref inner) => inner.fmt(f),
-            &Error::Unexpected(ref descr) =>
+            Error::Io(ref inner) => inner.fmt(f),
+            Error::Unexpected(ref descr) =>
                 write!(f, "unexpected {}", descr),
-            &Error::Server(ref descr) =>
+            Error::Server(ref descr) =>
                 write!(f, "server error: {}", descr),
-            &Error::AuthenticationFailure(ref descr) =>
+            Error::AuthenticationFailure(ref descr) =>
                 write!(f, "authentication failure: {}", descr),
             _ => f.write_str(&self.to_string())
         }
@@ -55,7 +55,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn cause(&self) -> Option<&dyn std::error::Error> {
         match self {
-            &Error::Io(ref inner) => Some(inner),
+            Error::Io(ref inner) => Some(inner),
             _ => None
         }
     }

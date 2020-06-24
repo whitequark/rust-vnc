@@ -1,6 +1,4 @@
-use std;
 use std::io::Read;
-use flate2;
 use byteorder::ReadBytesExt;
 use crate::{protocol, Error, Result, Rect};
 
@@ -11,11 +9,11 @@ struct ZlibReader<'a> {
 
 impl<'a> ZlibReader<'a> {
     fn new(decompressor: flate2::Decompress, input: &'a [u8]) -> ZlibReader<'a> {
-        ZlibReader { decompressor: decompressor, input: input }
+        ZlibReader { decompressor, input }
     }
 
     fn into_inner(self) -> Result<flate2::Decompress> {
-        if self.input.len() == 0 {
+        if self.input.is_empty() {
             Ok(self.decompressor)
         } else {
             Err(Error::Unexpected("leftover ZRLE byte data"))
@@ -51,7 +49,7 @@ struct BitReader<T: Read> {
 
 impl<T: Read> BitReader<T> {
     fn new(reader: T) -> BitReader<T> {
-        BitReader { reader: reader, buffer: 0, position: 8 }
+        BitReader { reader, buffer: 0, position: 8 }
     }
 
     fn into_inner(self) -> Result<T> {
@@ -142,8 +140,9 @@ impl Decoder {
             (format.red_max   as u32) << format.red_shift   |
             (format.green_max as u32) << format.green_shift |
             (format.blue_max  as u32) << format.blue_shift;
+        #[allow(clippy::verbose_bit_mask)]
         let (compressed_bpp, pad_pixel) =
-            if format.bits_per_pixel == 32 && format.true_colour == true && format.depth <= 24 {
+            if format.bits_per_pixel == 32 && format.true_colour && format.depth <= 24 {
                 if pixel_mask & 0x000000ff == 0 {
                     (3, !format.big_endian)
                 } else if pixel_mask & 0xff000000 == 0 {
@@ -236,7 +235,7 @@ impl Decoder {
                 }
 
                 let tile = Rect { top: rect.top + y, left: rect.left + x,
-                                  width: width, height: height };
+                                  width, height };
                 if let false = callback(tile, pixels)? {
                     return Ok(false)
                 }

@@ -57,14 +57,14 @@ fn pixel_format_vnc_to_sdl(vnc_format: vnc::PixelFormat) -> Option<SdlPixelForma
     for format in &FORMAT_MAP {
         if format.1 == vnc_format { return Some(format.0) }
     }
-    return None
+    None
 }
 
 fn pixel_format_sdl_to_vnc(sdl_format: SdlPixelFormat) -> Option<vnc::PixelFormat> {
     for format in &FORMAT_MAP {
         if format.0 == sdl_format { return Some(format.1) }
     }
-    return None
+    None
 }
 
 fn mask_cursor(vnc_in_format: vnc::PixelFormat, in_pixels: Vec<u8>, mask_pixels: Vec<u8>) ->
@@ -190,14 +190,15 @@ fn main() {
             }
         };
 
+    #[allow(clippy::single_match)]
     let mut vnc =
         match vnc::Client::from_tcp_stream(stream, !exclusive, |methods| {
             debug!("available authentication methods: {:?}", methods);
             for method in methods {
                 match method {
-                    &vnc::client::AuthMethod::None =>
+                    vnc::client::AuthMethod::None =>
                         return Some(vnc::client::AuthChoice::None),
-                    &vnc::client::AuthMethod::Password => {
+                    vnc::client::AuthMethod::Password => {
                         return match password {
                             None => None,
                             Some(ref password) => {
@@ -210,7 +211,7 @@ fn main() {
                             }
                         }
                     },
-                    &vnc::client::AuthMethod::AppleRemoteDesktop =>
+                    vnc::client::AuthMethod::AppleRemoteDesktop =>
                         match (username, password) {
                             (Some(username), Some(password)) =>
                                 return Some(vnc::client::AuthChoice::AppleRemoteDesktop(
@@ -278,7 +279,7 @@ fn main() {
     let mut key_ctrl = false;
 
     renderer.clear();
-    vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+    vnc.request_update(vnc::Rect { left: 0, top: 0, width, height },
                        false).unwrap();
 
     let mut incremental = true;
@@ -316,7 +317,7 @@ fn main() {
                         sdl_format.byte_size_of_pixels(vnc_rect.width as usize)).unwrap();
                     renderer.copy(&screen, Some(sdl_rect), Some(sdl_rect));
                     incremental |= vnc_rect == vnc::Rect { left: 0, top: 0,
-                                                           width: width, height: height };
+                                                           width, height };
                 },
                 Event::CopyPixels { src: vnc_src, dst: vnc_dst } => {
                     let sdl_src = SdlRect::new_unwrap(
@@ -382,6 +383,7 @@ fn main() {
             if sdl_timer.ticks() - ticks > FRAME_MS { continue 'running }
         }
 
+        #[allow(clippy::single_match)]
         match cursor_rect {
             Some(cursor_rect) =>
                 renderer.copy(&screen, Some(cursor_rect), Some(cursor_rect)),
@@ -431,6 +433,7 @@ fn main() {
 
             if view_only { continue }
 
+            #[allow(clippy::single_match)]
             match event {
                 Event::KeyDown { keycode: Some(keycode), .. } |
                 Event::KeyUp { keycode: Some(keycode), .. } => {
@@ -502,7 +505,7 @@ fn main() {
             vnc.poke_qemu().unwrap();
             qemu_next_update = sdl_timer.ticks() + qemu_network_rtt / 2;
         } else {
-            vnc.request_update(vnc::Rect { left: 0, top: 0, width: width, height: height},
+            vnc.request_update(vnc::Rect { left: 0, top: 0, width, height},
                                incremental).unwrap();
 
         }

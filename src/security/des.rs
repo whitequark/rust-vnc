@@ -47,7 +47,7 @@ fn compute_subkeys(key: u64) -> Vec<u64> {
     let mut subkeys = vec![k0];
 
     for shift_count in &table {
-        let last_key = subkeys.last().unwrap().clone();
+        let last_key = subkeys.last().unwrap();
         let last_ci = last_key & 0xFFFFFFF000000000;
         let last_di = last_key << HALF_KEY_SIZE;
         let (ci, di) = circular_left_shift(last_ci, last_di, *shift_count);
@@ -278,12 +278,10 @@ fn s(box_id: usize, block: u64) -> u64 {
 /// Swap bits using a table.
 fn swap_bits(key: u64, table: &[u64]) -> u64 {
     let mut result = 0;
-    let mut pos = 0;
 
-    for index in table.iter() {
+    for (pos, index) in table.iter().enumerate() {
         let bit = (key << (index - 1)) & FIRST_BIT;
         result |= bit >> pos;
-        pos += 1;
     }
 
     result
@@ -291,7 +289,7 @@ fn swap_bits(key: u64, table: &[u64]) -> u64 {
 
 /// Convert a slice to a `Key`.
 fn to_key(slice: &[u8]) -> Key {
-    let mut vec: Vec<u8> = slice.iter().cloned().collect();
+    let mut vec: Vec<u8> = slice.to_vec();
     let mut key = [0; 8];
     let diff = key.len() - vec.len();
     if diff > 0 {

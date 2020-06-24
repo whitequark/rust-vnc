@@ -189,7 +189,7 @@ impl Client {
             }
         };
 
-        if security_types.len() == 0 {
+        if security_types.is_empty() {
             let reason = String::read_from(&mut stream)?;
             debug!("<- {:?}", reason);
             return Err(Error::Server(reason))
@@ -224,6 +224,7 @@ impl Client {
             }
         }
 
+        #[allow(clippy::single_match)]
         match auth_choice {
             AuthChoice::Password(mut password) => {
                 // Reverse the bits in every byte of password.
@@ -235,6 +236,7 @@ impl Client {
                 // I hate every single fucker involved in the chain of decisions that
                 // led to this authentication scheme, and doubly so because it is completely
                 // undocumented in what passes for the specification of the RFB protocol.
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..8 {
                     let c = password[i];
                     let mut cs = 0u8;
@@ -245,7 +247,7 @@ impl Client {
                 let mut challenge = [0; 16];
                 stream.read_exact(&mut challenge)?;
                 let response = des(&challenge, &password);
-                stream.write(&response)?;
+                stream.write_all(&response)?;
             },
             #[cfg(feature = "apple-auth")]
             AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
@@ -281,7 +283,7 @@ impl Client {
             }
         }
 
-        let client_init = protocol::ClientInit { shared: shared };
+        let client_init = protocol::ClientInit { shared };
         debug!("-> {:?}", client_init);
         protocol::ClientInit::write_to(&client_init, &mut stream)?;
 
@@ -302,11 +304,11 @@ impl Client {
         }
 
         Ok(Client {
-            stream:  stream,
+            stream,
             events:  rx_events,
             name:    server_init.name,
             size:    (server_init.framebuffer_width, server_init.framebuffer_height),
-            format:  format
+            format,
         })
     }
 
@@ -323,7 +325,7 @@ impl Client {
 
     pub fn request_update(&mut self, rect: Rect, incremental: bool) -> Result<()> {
         let update_req = protocol::C2S::FramebufferUpdateRequest {
-            incremental: incremental,
+            incremental,
             x_position:  rect.left,
             y_position:  rect.top,
             width:       rect.width,
@@ -336,8 +338,8 @@ impl Client {
 
     pub fn send_key_event(&mut self, down: bool, key: u32) -> Result<()> {
         let key_event = protocol::C2S::KeyEvent {
-            down: down,
-            key:  key
+            down,
+            key,
         };
         debug!("-> {:?}", key_event);
         protocol::C2S::write_to(&key_event, &mut self.stream)?;

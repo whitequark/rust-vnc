@@ -64,9 +64,9 @@ impl Message for Version {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
-            &Version::Rfb33 => writer.write_all(b"RFB 003.003\n"),
-            &Version::Rfb37 => writer.write_all(b"RFB 003.007\n"),
-            &Version::Rfb38 => writer.write_all(b"RFB 003.008\n"),
+            Version::Rfb33 => writer.write_all(b"RFB 003.003\n"),
+            Version::Rfb37 => writer.write_all(b"RFB 003.007\n"),
+            Version::Rfb38 => writer.write_all(b"RFB 003.008\n"),
         }?;
         Ok(())
     }
@@ -97,11 +97,11 @@ impl Message for SecurityType {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let security_type = match self {
-            &SecurityType::Invalid => 0,
-            &SecurityType::None => 1,
-            &SecurityType::VncAuthentication => 2,
-            &SecurityType::AppleRemoteDesktop => 30,
-            &SecurityType::Unknown(n) => n
+            SecurityType::Invalid => 0,
+            SecurityType::None => 1,
+            SecurityType::VncAuthentication => 2,
+            SecurityType::AppleRemoteDesktop => 30,
+            SecurityType::Unknown(n) => *n
         };
         writer.write_u8(security_type)?;
         Ok(())
@@ -149,8 +149,8 @@ impl Message for SecurityResult {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let result = match self {
-            &SecurityResult::Succeeded => 0,
-            &SecurityResult::Failed => 1
+            SecurityResult::Succeeded => 0,
+            SecurityResult::Failed => 1
         };
         writer.write_u32::<BigEndian>(result)?;
         Ok(())
@@ -176,9 +176,9 @@ impl Message for AppleAuthHandshake {
         reader.read_exact(&mut peer_key)?;
 
         Ok(AppleAuthHandshake {
-            generator: generator,
-            prime: prime,
-            peer_key: peer_key,
+            generator,
+            prime,
+            peer_key,
         })
     }
 
@@ -350,14 +350,14 @@ impl Message for Encoding {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let encoding = match self {
-            &Encoding::Raw => 0,
-            &Encoding::CopyRect => 1,
-            &Encoding::Rre => 2,
-            &Encoding::Hextile => 5,
-            &Encoding::Zrle => 16,
-            &Encoding::Cursor => -239,
-            &Encoding::DesktopSize => -223,
-            &Encoding::Unknown(n) => n
+            Encoding::Raw => 0,
+            Encoding::CopyRect => 1,
+            Encoding::Rre => 2,
+            Encoding::Hextile => 5,
+            Encoding::Zrle => 16,
+            Encoding::Cursor => -239,
+            Encoding::DesktopSize => -223,
+            Encoding::Unknown(n) => *n
         };
         writer.write_i32::<BigEndian>(encoding)?;
         Ok(())
@@ -424,7 +424,7 @@ impl Message for C2S {
                 let down = reader.read_u8()? != 0;
                 reader.read_exact(&mut [0u8; 2])?;
                 let key = reader.read_u32::<BigEndian>()?;
-                Ok(C2S::KeyEvent { down: down, key: key })
+                Ok(C2S::KeyEvent { down, key })
             },
             5 => {
                 Ok(C2S::PointerEvent {
@@ -442,12 +442,12 @@ impl Message for C2S {
     }
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
-            &C2S::SetPixelFormat(ref pixel_format) => {
+            C2S::SetPixelFormat(ref pixel_format) => {
                 writer.write_u8(0)?;
                 writer.write_all(&[0u8; 3])?;
                 PixelFormat::write_to(pixel_format, writer)?;
             },
-            &C2S::SetEncodings(ref encodings) => {
+            C2S::SetEncodings(ref encodings) => {
                 writer.write_u8(2)?;
                 writer.write_all(&[0u8; 1])?;
                 writer.write_u16::<BigEndian>(encodings.len() as u16)?; // TODO: check?
@@ -455,27 +455,27 @@ impl Message for C2S {
                     Encoding::write_to(encoding, writer)?;
                 }
             },
-            &C2S::FramebufferUpdateRequest { incremental, x_position, y_position, width, height } => {
+            C2S::FramebufferUpdateRequest { incremental, x_position, y_position, width, height } => {
                 writer.write_u8(3)?;
-                writer.write_u8(if incremental { 1 } else { 0 })?;
-                writer.write_u16::<BigEndian>(x_position)?;
-                writer.write_u16::<BigEndian>(y_position)?;
-                writer.write_u16::<BigEndian>(width)?;
-                writer.write_u16::<BigEndian>(height)?;
+                writer.write_u8(if *incremental { 1 } else { 0 })?;
+                writer.write_u16::<BigEndian>(*x_position)?;
+                writer.write_u16::<BigEndian>(*y_position)?;
+                writer.write_u16::<BigEndian>(*width)?;
+                writer.write_u16::<BigEndian>(*height)?;
             },
-            &C2S::KeyEvent { down, key } => {
+            C2S::KeyEvent { down, key } => {
                 writer.write_u8(4)?;
-                writer.write_u8(if down { 1 } else { 0 })?;
+                writer.write_u8(if *down { 1 } else { 0 })?;
                 writer.write_all(&[0u8; 2])?;
-                writer.write_u32::<BigEndian>(key)?;
+                writer.write_u32::<BigEndian>(*key)?;
             },
-            &C2S::PointerEvent { button_mask, x_position, y_position } => {
+            C2S::PointerEvent { button_mask, x_position, y_position } => {
                 writer.write_u8(5)?;
-                writer.write_u8(button_mask)?;
-                writer.write_u16::<BigEndian>(x_position)?;
-                writer.write_u16::<BigEndian>(y_position)?;
+                writer.write_u8(*button_mask)?;
+                writer.write_u16::<BigEndian>(*x_position)?;
+                writer.write_u16::<BigEndian>(*y_position)?;
             },
-            &C2S::CutText(ref text) => {
+            C2S::CutText(ref text) => {
                 String::write_to(text, writer)?;
             }
         }
@@ -576,7 +576,7 @@ impl Message for S2C {
                 for _ in 0..count {
                     colours.push(Colour::read_from(reader)?);
                 }
-                Ok(S2C::SetColourMapEntries { first_colour: first_colour, colours: colours })
+                Ok(S2C::SetColourMapEntries { first_colour, colours })
             },
             2 => {
                 Ok(S2C::Bell)
@@ -591,23 +591,23 @@ impl Message for S2C {
 
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
-            &S2C::FramebufferUpdate { count } => {
+            S2C::FramebufferUpdate { count } => {
                 writer.write_u8(0)?;
                 writer.write_all(&[0u8; 1])?;
-                writer.write_u16::<BigEndian>(count)?;
+                writer.write_u16::<BigEndian>(*count)?;
             },
-            &S2C::SetColourMapEntries { first_colour, ref colours } => {
+            S2C::SetColourMapEntries { first_colour, ref colours } => {
                 writer.write_u8(1)?;
                 writer.write_all(&[0u8; 1])?;
-                writer.write_u16::<BigEndian>(first_colour)?;
+                writer.write_u16::<BigEndian>(*first_colour)?;
                 for colour in colours {
                     Colour::write_to(colour, writer)?;
                 }
             },
-            &S2C::Bell => {
+            S2C::Bell => {
                 writer.write_u8(2)?;
             },
-            &S2C::CutText(ref text) => {
+            S2C::CutText(ref text) => {
                 writer.write_u8(3)?;
                 writer.write_all(&[0u8; 3])?;
                 String::write_to(text, writer)?;

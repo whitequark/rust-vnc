@@ -1,13 +1,4 @@
-/*extern crate env_logger;
-#[macro_use] extern crate log;
-#[macro_use] extern crate clap;
-extern crate vnc;
-extern crate sdl2;
-extern crate x11;
-extern crate byteorder;*/
-
 use log::{info, error, debug, warn};
-
 use std::io::{Result as IoResult, ErrorKind as IoErrorKind, Read, Write, Cursor};
 use clap::{Arg, App, value_t};
 use sdl2::pixels::{Color, PixelMasks, PixelFormatEnum as SdlPixelFormat};

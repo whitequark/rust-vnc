@@ -11,23 +11,21 @@ use crate::security::des;
 use security::apple_auth;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AuthMethod {
     None,
     Password,
     AppleRemoteDesktop,
     /* more to come */
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AuthChoice {
     None,
     Password([u8; 8]),
     AppleRemoteDesktop(String, String),
     /* more to come */
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 #[derive(Debug)]
@@ -72,7 +70,7 @@ impl Event {
             match packet {
                 protocol::S2C::SetColourMapEntries { first_colour, colours } => {
                     send!(tx_events, Event::SetColourMap {
-                        first_colour: first_colour, colours: colours
+                        first_colour, colours,
                     })
                 },
                 protocol::S2C::FramebufferUpdate { count } => {
@@ -105,7 +103,7 @@ impl Event {
                                     width:  rectangle.width,
                                     height: rectangle.height
                                 };
-                                send!(tx_events, Event::CopyPixels { src: src, dst: dst })
+                                send!(tx_events, Event::CopyPixels { src, dst })
                             },
                             protocol::Encoding::Zrle => {
                                 let length = stream.read_u32::<BigEndian>()?;
@@ -130,8 +128,8 @@ impl Event {
                                 send!(tx_events, Event::SetCursor {
                                     size:      (rectangle.width, rectangle.height),
                                     hotspot:   (rectangle.x_position, rectangle.y_position),
-                                    pixels:    pixels,
-                                    mask_bits: mask_bits
+                                    pixels,
+                                    mask_bits,
                                 })
                             },
                             protocol::Encoding::DesktopSize => {
@@ -217,7 +215,6 @@ impl Client {
                     AuthChoice::None => protocol::SecurityType::None,
                     AuthChoice::Password(_) => protocol::SecurityType::VncAuthentication,
                     AuthChoice::AppleRemoteDesktop(_, _) => protocol::SecurityType::AppleRemoteDesktop,
-                    AuthChoice::__Nonexhaustive => unreachable!()
                 };
                 debug!("-> SecurityType::{:?}", used_security_type);
                 protocol::SecurityType::write_to(&used_security_type, &mut stream)?;

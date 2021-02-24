@@ -265,13 +265,12 @@ impl Client {
                 // I hate every single fucker involved in the chain of decisions that
                 // led to this authentication scheme, and doubly so because it is completely
                 // undocumented in what passes for the specification of the RFB protocol.
-                for i in 0..8 {
-                    let c = password[i];
+                for c in &mut password {
                     let mut cs = 0u8;
                     for j in 0..8 {
-                        cs |= ((c >> j) & 1) << (7 - j)
+                        cs |= ((*c >> j) & 1) << (7 - j)
                     }
-                    password[i] = cs;
+                    *c = cs;
                 }
 
                 let mut challenge = [0; 16];

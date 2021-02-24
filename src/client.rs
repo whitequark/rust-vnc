@@ -2,8 +2,6 @@ use crate::security::des;
 use crate::{protocol, zrle, Colour, Error, Rect, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use protocol::Message;
-#[cfg(feature = "apple-auth")]
-use security::apple_auth;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
@@ -277,12 +275,6 @@ impl Client {
                 stream.read_exact(&mut challenge)?;
                 let response = des(&challenge, &password);
                 stream.write_all(&response)?;
-            }
-            #[cfg(feature = "apple-auth")]
-            AuthChoice::AppleRemoteDesktop(ref username, ref password) => {
-                let handshake = protocol::AppleAuthHandshake::read_from(&mut stream)?;
-                let response = apple_auth(username, password, &handshake);
-                response.write_to(&mut stream)?;
             }
             _ => (),
         }

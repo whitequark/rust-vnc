@@ -9,7 +9,6 @@ env:
     - secure: "iTFsbUC9U1KjjIMLeX0Bq7wKn4ICB7q2FFTDgcNX74KW8KPIA8ihCLbOBoA8ds6JjeN5HmMjDqJ3npaeryw6vD1aXY4DQbq1tzuoNsszBnruqwTTy3pbh6Mf1sse8BySXIgfQcFY1pJDXSqSxLtYvypUc8iYCTdx2fSKYReIgHXzLRBvAYb36bRE6tnH4iwPG29NqdUht7UfOsXHPLPLDmK1Zd0y+JdMyPH32lI5hJY+1uWXN4PUvfDXV3aJhSTPrQPfJn7fzntuOAkApO1FLvq8YTIYZ59S1ZE6e6bnl/qIX9HrdBnuaU0hTSOIwXHhJJ9bd0stW63MMj0mffUgOO3oUinXWwgLCA17Nbxbdaq9ZhbVW0QYnqNip5+GGw7bAP85C8AMtqqklCa7Lp/wkG8usS3dsmVT4oy+fMRnxB7za5YZfhfFC6sJG3qPCnRrpAtVuYdJL0Nmo7mVuHUIbt2FM+pIanDFXoZ4PvWYdLg+GQ4RprhRrcYflKaVhdei++uSQOJgdUqkdMa7eW8EQjHH4GqznuiZYewxQTN6E8m9JUgfWHhz8h4/2zCMnz4pooSMkkcPOltwi5Sbjosj7a09Ycla3Yb3PXm9QUJjgmiQcDLbtDYFuq1moHjHll5PKYcvRabgqVqQKDnC+HRTdT+iyzLX5TCaz50w4LJXmlA="
   matrix:
     - FEATURES=""
-    - FEATURES="apple-auth"
 before_install:
   - sudo apt-get -y update
   - sudo apt-get -y install libsdl2-dev

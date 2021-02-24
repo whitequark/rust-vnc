@@ -1,13 +1,7 @@
 #[macro_use]
 extern crate log;
 extern crate byteorder;
-#[cfg(feature = "apple-auth")]
-extern crate crypto;
 extern crate flate2;
-#[cfg(feature = "apple-auth")]
-extern crate num_bigint;
-#[cfg(feature = "apple-auth")]
-extern crate octavo;
 
 mod protocol;
 mod security;

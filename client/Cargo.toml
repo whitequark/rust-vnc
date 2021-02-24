@@ -9,9 +9,6 @@ homepage = "https://github.com/whitequark/rust-vnc"
 description = "A VNC client"
 edition = "2018"
 
-[features]
-apple-auth = ["vnc/apple-auth"]
-
 [[bin]]
 name = "rvncclient"
 path = "main.rs"
@@ -20,8 +17,8 @@ path = "main.rs"
 byteorder = "0.5"
 log = "0.4"
 env_logger = "0.7"
-clap = "1.5"
-sdl2 = "0.13"
+clap = "2.33"
+sdl2 = "0.34"
 x11 = "2.3"
 
 [dependencies.vnc]

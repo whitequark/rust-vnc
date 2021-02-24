@@ -9,9 +9,6 @@ homepage = "https://github.com/whitequark/rust-vnc"
 description = "A VNC proxy"
 edition = "2018"
 
-[features]
-apple-auth = ["vnc/apple-auth"]
-
 [[bin]]
 name = "rvncproxy"
 path = "main.rs"
@@ -19,7 +16,7 @@ path = "main.rs"
 [dependencies]
 log = "0.3"
 env_logger = "0.3"
-clap = "1.5"
+clap = "2.33"
 
 [dependencies.vnc]
 path = ".."

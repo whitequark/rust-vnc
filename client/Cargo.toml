@@ -20,7 +20,7 @@ path = "main.rs"
 byteorder = "0.5"
 log = "0.4"
 env_logger = "0.7"
-clap = "1.5"
+clap = "2.33"
 sdl2 = "0.13"
 x11 = "2.3"
 

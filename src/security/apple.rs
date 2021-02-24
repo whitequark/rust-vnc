@@ -1,23 +1,25 @@
-use std::cmp::min;
-use octavo::crypto::asymmetric::dh::{DHParameters, DHPublicKey};
-use num_bigint::BigUint;
+use ::protocol;
 use crypto::aessafe::AesSafe128Encryptor;
 use crypto::symmetriccipher::BlockEncryptor;
-use ::protocol;
+use num_bigint::BigUint;
+use octavo::crypto::asymmetric::dh::{DHParameters, DHPublicKey};
 use security::md5::md5;
+use std::cmp::min;
 
 // http://cafbit.com/entry/apple_remote_desktop_quirks
-pub fn apple_auth(username: &str, password: &str,
-                  handshake: &protocol::AppleAuthHandshake) -> protocol::AppleAuthResponse {
+pub fn apple_auth(
+    username: &str,
+    password: &str,
+    handshake: &protocol::AppleAuthHandshake,
+) -> protocol::AppleAuthResponse {
     let param = DHParameters::new(&handshake.prime, handshake.generator as u64);
     let priv_key = param.private_key();
     let pub_key = priv_key.public_key();
-    let secret =
-        md5(
-            &priv_key.exchange(&DHPublicKey::new(
-                BigUint::from_bytes_be(&handshake.peer_key)
-            )).to_bytes_be()
-        );
+    let secret = md5(&priv_key
+        .exchange(&DHPublicKey::new(BigUint::from_bytes_be(
+            &handshake.peer_key,
+        )))
+        .to_bytes_be());
 
     let mut credentials = [0u8; 128];
     let ul = min(64, username.len());

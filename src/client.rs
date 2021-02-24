@@ -253,6 +253,7 @@ impl Client {
             }
         }
 
+        #[allow(clippy::single_match)]
         match auth_choice {
             AuthChoice::Password(mut password) => {
                 // Reverse the bits in every byte of password.

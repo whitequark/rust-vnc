@@ -18,7 +18,7 @@ byteorder = "0.5"
 log = "0.4"
 env_logger = "0.7"
 clap = "2.33"
-sdl2 = "0.13"
+sdl2 = "0.34"
 x11 = "2.3"
 
 [dependencies.vnc]
